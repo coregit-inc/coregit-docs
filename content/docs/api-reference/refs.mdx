@@ -1,0 +1,110 @@
+---
+title: Refs
+description: Low-level ref management with atomic compare-and-swap updates.
+---
+
+Refs are the low-level pointers that branches and tags are built on. These endpoints give you direct control over ref values, including atomic compare-and-swap (CAS) for safe concurrent updates.
+
+For higher-level branch management, see [Branches](/docs/api-reference/branches).
+
+## List Refs
+
+```http
+GET /v1/repos/:slug/refs
+```
+
+Returns all refs (branches and tags) with their SHAs.
+
+**Response** `200`:
+
+```json
+{
+  "refs": [
+    { "ref": "refs/heads/main", "sha": "7f3b..." },
+    { "ref": "refs/heads/feature-x", "sha": "a1c2..." },
+    { "ref": "refs/tags/v1.0", "sha": "d4e5..." }
+  ]
+}
+```
+
+## Get Ref
+
+```http
+GET /v1/repos/:slug/refs/heads/main
+```
+
+```json
+{
+  "ref": "refs/heads/main",
+  "sha": "7f3b..."
+}
+```
+
+The path after `/refs/` maps directly to the ref name: `/refs/heads/main` → `refs/heads/main`, `/refs/tags/v1.0` → `refs/tags/v1.0`.
+
+## Update Ref
+
+```http
+PUT /v1/repos/:slug/refs/heads/main
+```
+
+```json
+{
+  "sha": "a1c2...",
+  "expected_sha": "7f3b..."
+}
+```
+
+- `sha` — Required. The new SHA to point the ref to (must be a valid object in the repo)
+- `expected_sha` — Optional. If provided, the update only succeeds if the ref currently points to this SHA (compare-and-swap)
+
+**Response** `200`:
+
+```json
+{
+  "ref": "refs/heads/main",
+  "sha": "a1c2...",
+  "previous_sha": "7f3b..."
+}
+```
+
+### Compare-and-Swap (CAS)
+
+When `expected_sha` is provided, the update is atomic: it fails with `409` if the ref was modified between your read and write. This prevents lost updates in concurrent workflows.
+
+```bash
+# Read current value
+curl https://api.coregit.dev/v1/repos/my-repo/refs/heads/main \
+  -H "x-api-key: YOUR_KEY"
+# → { "ref": "refs/heads/main", "sha": "7f3b..." }
+
+# Conditionally update
+curl -X PUT https://api.coregit.dev/v1/repos/my-repo/refs/heads/main \
+  -H "x-api-key: YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"sha": "a1c2...", "expected_sha": "7f3b..."}'
+# → 200 if successful, 409 if ref changed
+```
+
+### Error Cases
+
+- Returns `404` if the target object doesn't exist in the repo
+- Returns `409` if `expected_sha` doesn't match the current ref value
+
+## Delete Ref
+
+```http
+DELETE /v1/repos/:slug/refs/heads/feature-x
+```
+
+**Response** `200`:
+
+```json
+{
+  "deleted": true,
+  "ref": "refs/heads/feature-x",
+  "sha": "a1c2..."
+}
+```
+
+You cannot delete the default branch.

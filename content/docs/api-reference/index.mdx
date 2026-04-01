@@ -36,7 +36,8 @@ All responses return JSON. Successful responses use `2xx` status codes. Errors f
 | `400` | Bad request (validation error) |
 | `401` | Missing or invalid API key |
 | `404` | Resource not found |
-| `409` | Conflict (e.g., branch head changed) |
+| `409` | Conflict (e.g., branch head changed, merge conflict) |
+| `422` | Unprocessable (e.g., no common ancestor between refs) |
 | `429` | Rate limited |
 
 ## Pagination

@@ -62,25 +62,76 @@ You cannot delete the default branch.
 POST /v1/repos/:slug/branches/:name/merge
 ```
 
-The `:name` in the URL is the **source branch**. The request body specifies the **target**:
+The `:name` in the URL is the **source branch**. The request body specifies the **target** and **strategy**:
 
 ```json
 {
-  "target": "main"
+  "target": "main",
+  "strategy": "fast-forward"
 }
 ```
 
 - `target` — Branch to merge into (optional, defaults to repo's default branch)
-- `strategy` — Merge strategy (optional, currently only fast-forward is supported)
+- `strategy` — Merge strategy (optional, default: `"fast-forward"`). One of: `"fast-forward"`, `"merge-commit"`, `"squash"`
+- `message` — Custom commit message (optional, used with `merge-commit` and `squash`)
+- `author` — `{ name, email }` for the merge commit author (optional, used with `merge-commit` and `squash`)
+- `expected_sha` — CAS check on the target branch (optional). Fails with `409` if the target has moved
+
+### Strategies
+
+| Strategy | Behavior |
+|----------|----------|
+| `fast-forward` | Moves the target pointer forward. Fails if branches have diverged |
+| `merge-commit` | Creates a merge commit with two parents. Supports diverged branches with 3-way auto-merge |
+| `squash` | Applies all changes as a single new commit on the target. No merge history |
+
+### Fast-Forward Response
 
 **Response** `200`:
 
 ```json
 {
   "merged": true,
-  "sha": "7f3b...",
+  "sha": "a1c2...",
   "strategy": "fast-forward"
 }
 ```
 
-Returns `409` if the merge cannot be fast-forwarded.
+Returns `409` if the branches have diverged and cannot be fast-forwarded.
+
+### Merge-Commit Response
+
+**Response** `200`:
+
+```json
+{
+  "merged": true,
+  "sha": "f6a7...",
+  "strategy": "merge-commit",
+  "merge_sha": "f6a7..."
+}
+```
+
+Returns `409` with `conflicts` array if files cannot be auto-merged:
+
+```json
+{
+  "merged": false,
+  "strategy": "merge-commit",
+  "conflicts": ["src/auth.ts", "config.json"]
+}
+```
+
+### Squash Response
+
+**Response** `200`:
+
+```json
+{
+  "merged": true,
+  "sha": "b2c3...",
+  "strategy": "squash"
+}
+```
+
+Returns `409` with `conflicts` array if files conflict, same as merge-commit.

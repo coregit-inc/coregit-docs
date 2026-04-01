@@ -1,0 +1,81 @@
+---
+title: Compare
+description: Compare two refs — merge base, ahead/behind counts, file diffs, and mergeability.
+---
+
+## Compare Refs
+
+```http
+GET /v1/repos/:slug/compare?base=main&head=feature-x
+```
+
+Returns a full comparison between two refs: the merge base, how many commits each side is ahead/behind, file-level diffs with stats, and whether the head can be cleanly merged into the base.
+
+- `base` — Required. Branch name, tag, or commit SHA
+- `head` — Required. Branch name, tag, or commit SHA
+
+**Response** `200`:
+
+```json
+{
+  "base": "7f3b...",
+  "head": "a1c2...",
+  "merge_base": "d4e5...",
+  "ahead_by": 3,
+  "behind_by": 1,
+  "commits": [
+    {
+      "sha": "b2c3...",
+      "message": "feat: add login page",
+      "author": "Agent",
+      "email": "agent@example.com",
+      "date": "2025-06-15T12:00:00.000Z"
+    }
+  ],
+  "files": [
+    {
+      "path": "src/auth.ts",
+      "status": "modified",
+      "old_sha": "f6a7...",
+      "new_sha": "e8b9..."
+    },
+    {
+      "path": "src/login.ts",
+      "status": "added",
+      "old_sha": null,
+      "new_sha": "c3d4..."
+    }
+  ],
+  "total_files_changed": 2,
+  "total_additions": 45,
+  "total_deletions": 3,
+  "mergeable": true,
+  "conflicts": []
+}
+```
+
+### Fields
+
+- `merge_base` — The common ancestor commit of `base` and `head`
+- `ahead_by` — Number of commits in `head` that are not in `base` (since merge base)
+- `behind_by` — Number of commits in `base` that are not in `head` (since merge base)
+- `commits` — The ahead commits, oldest first
+- `files` — File-level diffs between `merge_base` and `head`
+- `mergeable` — Whether `head` can be merged into `base` without conflicts. `null` if too many commits to check (> 50)
+- `conflicts` — List of conflicting file paths (empty if mergeable)
+
+### File Statuses
+
+| Status | Meaning |
+|--------|---------|
+| `added` | New file in head |
+| `modified` | Changed between merge base and head |
+| `removed` | Deleted in head |
+
+### When Identical
+
+If `base` and `head` resolve to the same SHA, the response returns zeros for all counts and an empty file list.
+
+### Error Cases
+
+Returns `422` if no common ancestor exists between the two refs.

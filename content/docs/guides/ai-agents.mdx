@@ -170,6 +170,86 @@ if (commitRes.status === 409) {
 }
 ```
 
+## Branching and Merging
+
+For multi-step tasks, agents can work on feature branches and merge when ready:
+
+```javascript
+// Create a feature branch
+await fetch('https://api.coregit.dev/v1/repos/agent-output/branches', {
+  method: 'POST',
+  headers: {
+    'x-api-key': process.env.COREGIT_API_KEY,
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({ name: 'agent-task-42', from: 'main' }),
+});
+
+// Agent works on the branch (multiple commits)...
+
+// Check if it can be merged cleanly
+const compareRes = await fetch(
+  'https://api.coregit.dev/v1/repos/agent-output/compare?base=main&head=agent-task-42',
+  { headers: { 'x-api-key': process.env.COREGIT_API_KEY } }
+);
+const comparison = await compareRes.json();
+
+if (comparison.mergeable) {
+  // Merge into main
+  await fetch(
+    'https://api.coregit.dev/v1/repos/agent-output/branches/agent-task-42/merge',
+    {
+      method: 'POST',
+      headers: {
+        'x-api-key': process.env.COREGIT_API_KEY,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        target: 'main',
+        strategy: 'squash',
+        message: 'feat: implement user auth (agent-task-42)',
+      }),
+    }
+  );
+} else {
+  console.log('Conflicts:', comparison.conflicts);
+  // Handle conflicts or retry with a different approach
+}
+```
+
+## Cherry-Pick for Stacked Changes
+
+When multiple agents work in sequence, use cherry-pick to replay changes:
+
+```javascript
+// Agent A worked on commits base..headA on branch-a
+// Agent B needs to replay those onto a different branch
+const cherryPickRes = await fetch(
+  'https://api.coregit.dev/v1/repos/agent-output/cherry-pick',
+  {
+    method: 'POST',
+    headers: {
+      'x-api-key': process.env.COREGIT_API_KEY,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      base: mergeBase,      // start of range (exclusive)
+      head: agentAHead,     // end of range (inclusive)
+      onto: 'dev',          // replay onto dev branch
+      branch: 'dev',        // update dev branch with result
+      expected_sha: devHead, // CAS — fail if dev moved
+    }),
+  }
+);
+
+const result = await cherryPickRes.json();
+if (result.success) {
+  console.log('Replayed onto dev:', result.head_sha);
+} else {
+  console.log('Conflicts:', result.conflicts);
+}
+```
+
 ## Helper Function
 
 Wrap the API in a reusable function:
@@ -198,10 +278,28 @@ class CoregitClient {
     });
   }
 
-  commit(repoSlug: string, branch: string, message: string, actions: any[]) {
+  commit(repoSlug: string, branch: string, message: string, changes: any[]) {
     return this.request(`/repos/${repoSlug}/commits`, {
       method: 'POST',
-      body: JSON.stringify({ branch, message, actions }),
+      body: JSON.stringify({ branch, message, changes }),
+    });
+  }
+
+  compare(repoSlug: string, base: string, head: string) {
+    return this.request(`/repos/${repoSlug}/compare?base=${base}&head=${head}`);
+  }
+
+  cherryPick(repoSlug: string, base: string, head: string, onto: string, branch?: string) {
+    return this.request(`/repos/${repoSlug}/cherry-pick`, {
+      method: 'POST',
+      body: JSON.stringify({ base, head, onto, branch }),
+    });
+  }
+
+  merge(repoSlug: string, source: string, target: string, strategy: string = 'fast-forward') {
+    return this.request(`/repos/${repoSlug}/branches/${source}/merge`, {
+      method: 'POST',
+      body: JSON.stringify({ target, strategy }),
     });
   }
 
@@ -230,4 +328,10 @@ await git.createRepo('my-project');
 await git.commit('my-project', 'main', 'init', [
   { path: 'README.md', content: '# Hello' },
 ]);
+
+// Compare and merge
+const diff = await git.compare('my-project', 'main', 'feature');
+if (diff.mergeable) {
+  await git.merge('my-project', 'feature', 'main', 'squash');
+}
 ```

@@ -179,11 +179,25 @@ console.log(data.default_branch); // "main"
 const { data } = await git.branches.get("my-repo", "feature-x");
 console.log(data.sha); // head commit SHA
 
-// Merge (fast-forward only)
+// Merge (fast-forward)
 const { data } = await git.branches.merge("my-repo", "feature-x", {
   target: "main",
 });
 console.log(data.strategy); // "fast-forward" | "already_up_to_date"
+
+// Merge (merge-commit — supports diverged branches)
+const { data } = await git.branches.merge("my-repo", "feature-x", {
+  target: "main",
+  strategy: "merge-commit",
+  message: "Merge feature-x into main",
+});
+console.log(data.merge_sha); // merge commit SHA
+
+// Merge (squash — all changes as a single commit)
+const { data } = await git.branches.merge("my-repo", "feature-x", {
+  target: "main",
+  strategy: "squash",
+});
 
 // Delete
 await git.branches.delete("my-repo", "feature-x");
@@ -219,6 +233,90 @@ console.log(data.total_files_changed); // 3
 for (const file of data.files) {
   console.log(file.path, file.status); // "src/auth.ts" "modified"
 }
+```
+
+## Compare
+
+Full comparison between two refs — merge base, ahead/behind counts, and mergeability.
+
+```typescript
+const { data } = await git.compare.compare("my-repo", "main", "feature-x");
+
+console.log(data.merge_base);  // common ancestor SHA
+console.log(data.ahead_by);    // 3
+console.log(data.behind_by);   // 1
+console.log(data.mergeable);   // true | false | null
+
+for (const commit of data.commits) {
+  console.log(commit.sha, commit.message);
+}
+
+if (data.conflicts.length > 0) {
+  console.log("Conflicts:", data.conflicts); // ["src/auth.ts"]
+}
+```
+
+## Cherry-Pick
+
+Replay a range of commits onto a new base.
+
+```typescript
+// Cherry-pick commits from feature branch onto main
+const { data, error } = await git.cherryPick.execute("my-repo", {
+  base: "d4e5...",   // range start (exclusive)
+  head: "a1c2...",   // range end (inclusive)
+  onto: "main",
+  branch: "result-branch", // optional: update this branch
+});
+
+if (data.success) {
+  console.log(data.head_sha);        // new head after cherry-pick
+  console.log(data.commits_created); // 3
+} else {
+  console.log(data.conflicts);       // ["src/auth.ts"]
+  console.log(data.last_clean_sha);  // last successful commit
+}
+```
+
+### With CAS
+
+```typescript
+const { data, error } = await git.cherryPick.execute("my-repo", {
+  base: mergeBase,
+  head: featureHead,
+  onto: "main",
+  branch: "dev",
+  expected_sha: currentDevHead, // fails 409 if dev moved
+});
+```
+
+## Refs
+
+Low-level ref management with atomic compare-and-swap.
+
+```typescript
+// List all refs
+const { data } = await git.refs.list("my-repo");
+for (const ref of data.refs) {
+  console.log(ref.ref, ref.sha); // "refs/heads/main" "7f3b..."
+}
+
+// Get single ref
+const { data } = await git.refs.get("my-repo", "refs/heads/main");
+console.log(data.sha);
+
+// Update with CAS
+const { data, error } = await git.refs.update("my-repo", "refs/heads/main", {
+  sha: newSha,
+  expected_sha: currentSha, // atomic — fails if ref moved
+});
+
+if (error?.status === 409) {
+  // Ref was updated concurrently — re-read and retry
+}
+
+// Delete
+await git.refs.delete("my-repo", "refs/heads/feature-x");
 ```
 
 ## Snapshots

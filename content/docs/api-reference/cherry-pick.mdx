@@ -1,0 +1,80 @@
+---
+title: Cherry-Pick
+description: Replay a range of commits onto a new base, with conflict detection.
+---
+
+## Cherry-Pick Commits
+
+```http
+POST /v1/repos/:slug/cherry-pick
+```
+
+Replays a range of commits onto a new base. This is the core primitive for building rebase workflows, stacked changes, and automated conflict resolution.
+
+```json
+{
+  "base": "d4e5...",
+  "head": "a1c2...",
+  "onto": "main",
+  "branch": "result-branch",
+  "expected_sha": "7f3b..."
+}
+```
+
+### Fields
+
+- `base` — Required. Start of the commit range (exclusive). Branch name, tag, or SHA
+- `head` — Required. End of the commit range (inclusive). Branch name, tag, or SHA
+- `onto` — Required. The ref or SHA to replay commits onto
+- `branch` — Optional. Branch to update with the cherry-picked result
+- `expected_sha` — Optional. CAS check — if `branch` exists, its current SHA must match this value
+
+The commits replayed are those in the range `(base, head]` — `base` is excluded, `head` is included.
+
+### Success Response
+
+**Response** `200`:
+
+```json
+{
+  "success": true,
+  "head_sha": "f6a7...",
+  "onto_sha": "7f3b...",
+  "commits_created": 3,
+  "branch": "result-branch",
+  "branch_updated": true
+}
+```
+
+- `head_sha` — The SHA of the final cherry-picked commit. `null` if no commits were replayed (empty range)
+- `onto_sha` — The SHA that commits were replayed onto
+- `commits_created` — Number of commits in the range
+- `branch` — Included only if `branch` was specified in the request
+- `branch_updated` — Whether the branch was successfully updated
+
+### Conflict Response
+
+If any commit in the range conflicts with the target tree, the operation stops immediately:
+
+```json
+{
+  "success": false,
+  "onto_sha": "7f3b...",
+  "conflicts": ["src/auth.ts", "config.json"],
+  "last_clean_sha": "b2c3...",
+  "commits_created": 0
+}
+```
+
+- `conflicts` — File paths that could not be auto-merged
+- `last_clean_sha` — The last successfully cherry-picked commit (or the onto SHA if the first commit conflicts)
+
+### Limits
+
+- Max **100 commits** per cherry-pick operation
+
+### Error Cases
+
+- Returns `400` if `base` is not an ancestor of `head`
+- Returns `404` if any ref cannot be resolved
+- Returns `409` if `expected_sha` doesn't match the current branch head (concurrent update)
