@@ -1,26 +1,46 @@
-@import "tailwindcss";
+@import 'tailwindcss';
+@import 'fumadocs-ui/css/neutral.css';
+@import 'fumadocs-ui/css/preset.css';
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --color-fd-background: #f1f0ea;
+  --color-fd-foreground: #2d232e;
+  --color-fd-card: #e0ddcf;
+  --color-fd-card-foreground: #2d232e;
+  --color-fd-popover: #f1f0ea;
+  --color-fd-popover-foreground: #2d232e;
+  --color-fd-primary: #2d232e;
+  --color-fd-primary-foreground: #f1f0ea;
+  --color-fd-secondary: rgba(45, 35, 46, 0.06);
+  --color-fd-secondary-foreground: #2d232e;
+  --color-fd-muted: rgba(45, 35, 46, 0.06);
+  --color-fd-muted-foreground: #534b52;
+  --color-fd-accent: rgba(45, 35, 46, 0.06);
+  --color-fd-accent-foreground: #2d232e;
+  --color-fd-border: rgba(45, 35, 46, 0.12);
+  --color-fd-ring: #534b52;
+}
+
+.dark {
+  --color-fd-background: #2d232e;
+  --color-fd-foreground: #f1f0ea;
+  --color-fd-card: #3a2f3b;
+  --color-fd-card-foreground: #f1f0ea;
+  --color-fd-popover: #3a2f3b;
+  --color-fd-popover-foreground: #f1f0ea;
+  --color-fd-primary: #f1f0ea;
+  --color-fd-primary-foreground: #2d232e;
+  --color-fd-secondary: rgba(241, 240, 234, 0.06);
+  --color-fd-secondary-foreground: #f1f0ea;
+  --color-fd-muted: rgba(241, 240, 234, 0.06);
+  --color-fd-muted-foreground: #a09a9e;
+  --color-fd-accent: rgba(241, 240, 234, 0.06);
+  --color-fd-accent-foreground: #f1f0ea;
+  --color-fd-border: rgba(241, 240, 234, 0.08);
+  --color-fd-ring: #a09a9e;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  --font-display: var(--font-forum);
+  --font-body: var(--font-host-grotesk);
 }

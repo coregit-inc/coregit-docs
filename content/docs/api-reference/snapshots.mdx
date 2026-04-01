@@ -1,0 +1,51 @@
+---
+title: Snapshots
+description: Create named restore points and roll back branches.
+---
+
+## Create Snapshot
+
+```http
+POST /v1/repos/:slug/snapshots
+```
+
+```json
+{
+  "name": "before-refactor",
+  "branch": "main"
+}
+```
+
+Captures the current head of the branch as a named restore point.
+
+## List Snapshots
+
+```http
+GET /v1/repos/:slug/snapshots
+```
+
+## Get Snapshot
+
+```http
+GET /v1/repos/:slug/snapshots/:name
+```
+
+## Delete Snapshot
+
+```http
+DELETE /v1/repos/:slug/snapshots/:name
+```
+
+## Restore Snapshot
+
+```http
+POST /v1/repos/:slug/snapshots/:name/restore
+```
+
+```json
+{
+  "target_branch": "main"
+}
+```
+
+Resets the target branch head to the snapshot's commit SHA. This does not delete commits — you can always create a new snapshot before restoring.

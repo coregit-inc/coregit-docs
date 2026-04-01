@@ -1,0 +1,42 @@
+---
+title: Authentication
+description: How to authenticate with the Coregit API using API keys.
+---
+
+## API Keys
+
+All authenticated requests use the `x-api-key` header. Keys are scoped to an organization.
+
+```bash
+curl https://api.coregit.dev/v1/repos \
+  -H "x-api-key: cgk_live_YOUR_KEY"
+```
+
+## Key Format
+
+API keys follow the format `cgk_live_` followed by 40 random characters. The full key is shown only once at creation time — Coregit stores a SHA-256 hash.
+
+## Managing Keys
+
+- **Create**: Dashboard → API Keys → Create Key
+- **Revoke**: Dashboard → API Keys → Delete
+- **Rotate**: Create a new key, update your integrations, then delete the old one
+
+## Git Authentication
+
+For `git clone` and `git push`, use HTTP Basic Auth:
+
+```
+Username: your-org-slug
+Password: cgk_live_YOUR_KEY
+```
+
+Example:
+
+```bash
+git clone https://myorg:cgk_live_abc123@api.coregit.dev/myorg/my-repo.git
+```
+
+## Public Repositories
+
+Public repositories can be read without authentication. Write operations always require a valid API key.

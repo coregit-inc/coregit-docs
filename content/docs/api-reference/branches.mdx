@@ -1,0 +1,55 @@
+---
+title: Branches
+description: Create, list, and manage branches through the API.
+---
+
+## Create Branch
+
+```http
+POST /v1/repos/:slug/branches
+```
+
+```json
+{
+  "name": "feature-x",
+  "from": "main"
+}
+```
+
+The `from` field can be a branch name or a commit SHA.
+
+## List Branches
+
+```http
+GET /v1/repos/:slug/branches
+```
+
+## Get Branch
+
+```http
+GET /v1/repos/:slug/branches/:name
+```
+
+Returns the branch name and the SHA of its head commit.
+
+## Delete Branch
+
+```http
+DELETE /v1/repos/:slug/branches/:name
+```
+
+You cannot delete the default branch.
+
+## Merge Branch
+
+```http
+POST /v1/repos/:slug/branches/:name/merge
+```
+
+```json
+{
+  "source": "feature-x"
+}
+```
+
+Currently supports **fast-forward merges only**. Returns `409` if the merge cannot be fast-forwarded.

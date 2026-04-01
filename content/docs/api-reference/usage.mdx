@@ -1,0 +1,42 @@
+---
+title: Usage & Billing
+description: Monitor API usage and understand billing tiers.
+---
+
+## Get Usage Summary
+
+```http
+GET /v1/usage
+```
+
+Returns usage for the current billing month:
+
+```json
+{
+  "period": "2025-03",
+  "api_calls": 4521,
+  "repos": 3,
+  "git_transfer_bytes": 1048576,
+  "storage_bytes": 5242880
+}
+```
+
+## Get Usage Details
+
+```http
+GET /v1/usage/details?page=1&per_page=50
+```
+
+Returns individual usage events with timestamps.
+
+## Tiers
+
+| | Free | Usage |
+|---|---|---|
+| Repos | 5 | Unlimited |
+| API calls | 10,000 / month | Unlimited |
+| Git transfer | 5 GB / month | Unlimited |
+| Storage | 1 GB | Unlimited |
+| Price | $0 | $0.50 / repo / month + metered |
+
+Upgrade to the Usage tier from your [Dashboard](https://app.coregit.dev/dashboard/billing).

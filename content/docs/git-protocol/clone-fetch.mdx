@@ -1,0 +1,41 @@
+---
+title: Clone & Fetch
+description: Clone and fetch Coregit repositories with standard Git.
+---
+
+## Clone a Repository
+
+```bash
+# Public repository
+git clone https://api.coregit.dev/myorg/public-repo.git
+
+# Private repository
+git clone https://myorg:cgk_live_YOUR_KEY@api.coregit.dev/myorg/private-repo.git
+```
+
+## Fetch Updates
+
+```bash
+git fetch origin
+git pull origin main
+```
+
+## Shallow Clone
+
+Coregit supports shallow clones for faster checkout:
+
+```bash
+git clone --depth 1 https://myorg:KEY@api.coregit.dev/myorg/repo.git
+```
+
+## Credential Storage
+
+To avoid entering your API key every time, configure Git credentials:
+
+```bash
+# Store credentials in memory for 1 hour
+git config --global credential.helper 'cache --timeout=3600'
+
+# Or store permanently (less secure)
+git config --global credential.helper store
+```

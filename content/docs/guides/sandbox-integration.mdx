@@ -1,0 +1,51 @@
+---
+title: Sandbox Integration
+description: Integrate Coregit with sandboxed development environments.
+---
+
+## Overview
+
+Coregit pairs well with cloud sandboxes (Daytona, E2B, CodeSandbox) where AI agents write and test code. The workflow:
+
+1. Agent writes code in the sandbox
+2. Code is committed to Coregit via the API
+3. Users can clone the result locally or in their IDE
+
+## Setup
+
+```bash
+# Inside the sandbox, clone the Coregit repo
+git clone https://org:KEY@api.coregit.dev/org/repo.git workspace
+cd workspace
+```
+
+## Committing from Sandbox
+
+You can use either standard `git push` or the API:
+
+### Option A: Git Push
+
+```bash
+git add -A
+git commit -m "Agent changes"
+git push origin main
+```
+
+### Option B: API Commit
+
+```bash
+# Read file contents and commit via API
+curl -X POST https://api.coregit.dev/v1/repos/repo/commits \
+  -H "x-api-key: $COREGIT_KEY" \
+  -H "Content-Type: application/json" \
+  -d @commit-payload.json
+```
+
+The API approach is better for agents that generate files programmatically without a filesystem.
+
+## When to Use Each
+
+| Approach | Best For |
+|----------|----------|
+| Git push | Sandbox with filesystem + git binary |
+| API commit | Serverless functions, no filesystem access |

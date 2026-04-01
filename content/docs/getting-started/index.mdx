@@ -1,0 +1,44 @@
+---
+title: Quick Start
+description: Get up and running with Coregit in under 5 minutes.
+---
+
+## 1. Create an Account
+
+Sign up at [app.coregit.dev](https://app.coregit.dev) and create your organization.
+
+## 2. Generate an API Key
+
+Navigate to **Dashboard → API Keys** and create a new key. Copy it — you'll only see it once.
+
+## 3. Create a Repository
+
+```bash
+curl -X POST https://api.coregit.dev/v1/repos \
+  -H "x-api-key: cgk_live_YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"slug": "hello-world", "visibility": "private"}'
+```
+
+## 4. Commit Files
+
+```bash
+curl -X POST https://api.coregit.dev/v1/repos/hello-world/commits \
+  -H "x-api-key: cgk_live_YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "branch": "main",
+    "message": "Add README",
+    "actions": [
+      {"action": "add", "path": "README.md", "content": "# Hello from Coregit"}
+    ]
+  }'
+```
+
+## 5. Clone with Git
+
+```bash
+git clone https://your-org:cgk_live_YOUR_KEY@api.coregit.dev/your-org/hello-world.git
+```
+
+That's it! You now have a Git repository managed entirely through the API.

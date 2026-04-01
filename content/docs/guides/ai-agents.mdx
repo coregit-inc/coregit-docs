@@ -1,0 +1,45 @@
+---
+title: Using with AI Agents
+description: How AI coding agents can use Coregit for version-controlled code generation.
+---
+
+## Why Coregit for AI Agents?
+
+Traditional Git hosting requires a `git` binary, SSH keys, and a filesystem. AI agents running in serverless environments don't have these. Coregit solves this with a pure HTTP API.
+
+## Typical Workflow
+
+1. **Create a repo** via `POST /v1/repos`
+2. **Generate code** with your AI model
+3. **Commit files** via `POST /v1/repos/:slug/commits` — all files in one call
+4. **Create a snapshot** before risky changes
+5. **Restore** if the agent breaks something
+6. **Clone** the final result with standard `git clone`
+
+## Example: Multi-File Commit
+
+```javascript
+const response = await fetch('https://api.coregit.dev/v1/repos/agent-output/commits', {
+  method: 'POST',
+  headers: {
+    'x-api-key': process.env.COREGIT_API_KEY,
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({
+    branch: 'main',
+    message: 'Agent: implement user authentication',
+    actions: [
+      { action: 'add', path: 'src/auth.ts', content: authCode },
+      { action: 'add', path: 'src/middleware.ts', content: middlewareCode },
+      { action: 'modify', path: 'src/index.ts', content: updatedIndexCode },
+    ],
+  }),
+});
+```
+
+## Benefits
+
+- **No containers needed** — Pure HTTP, no git binary or filesystem
+- **Atomic commits** — All files committed in a single call
+- **Conflict detection** — CAS via `parent_sha` prevents race conditions
+- **Instant rollback** — Snapshots let you undo agent mistakes

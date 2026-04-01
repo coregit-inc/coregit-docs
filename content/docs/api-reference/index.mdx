@@ -1,0 +1,54 @@
+---
+title: API Overview
+description: Overview of the Coregit REST API — base URL, authentication, errors, and pagination.
+---
+
+## Base URL
+
+```
+https://api.coregit.dev/v1
+```
+
+## Authentication
+
+Include your API key in every request:
+
+```bash
+-H "x-api-key: cgk_live_YOUR_KEY"
+```
+
+## Response Format
+
+All responses return JSON. Successful responses use `2xx` status codes. Errors follow this shape:
+
+```json
+{
+  "error": "not_found",
+  "message": "Repository not found"
+}
+```
+
+## Common Status Codes
+
+| Code | Meaning |
+|------|---------|
+| `200` | Success |
+| `201` | Created |
+| `400` | Bad request (validation error) |
+| `401` | Missing or invalid API key |
+| `404` | Resource not found |
+| `409` | Conflict (e.g., branch head changed) |
+| `429` | Rate limited |
+
+## Pagination
+
+List endpoints accept `page` and `per_page` query parameters:
+
+```bash
+GET /v1/repos?page=1&per_page=20
+```
+
+## Rate Limits
+
+- **Free tier**: 10,000 API calls / month
+- **Usage tier**: Unlimited (metered billing)

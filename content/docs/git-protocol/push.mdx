@@ -1,0 +1,35 @@
+---
+title: Push
+description: Push local commits to Coregit repositories.
+---
+
+## Push to a Repository
+
+```bash
+git push origin main
+```
+
+Authentication is always required for push operations. Use HTTP Basic Auth with your org slug as username and API key as password.
+
+## Push a New Branch
+
+```bash
+git checkout -b feature-x
+# ... make changes ...
+git commit -m "Add feature X"
+git push origin feature-x
+```
+
+## Force Push
+
+```bash
+git push --force origin main
+```
+
+Force push is supported but use with caution — it rewrites branch history. Consider creating a [snapshot](/docs/api-reference/snapshots) before force-pushing.
+
+## Push Limitations
+
+- Maximum pack size depends on your tier
+- All pushed objects are stored as loose objects in Coregit's storage
+- Large binary files are supported but count toward storage limits

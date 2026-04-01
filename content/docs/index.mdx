@@ -1,0 +1,47 @@
+---
+title: Introduction
+description: Welcome to the Coregit documentation — serverless Git for AI-native products.
+---
+
+## What is Coregit?
+
+Coregit is a serverless Git hosting platform designed for AI agents and automated workflows. Instead of shelling out to `git` CLI or managing containers, you interact with repositories through a simple REST API.
+
+## Key Features
+
+- **API Commits** — Create multi-file commits in a single HTTP call
+- **Standard Git Protocol** — Clone and push with any Git client over HTTPS
+- **Snapshots & Restore** — Named restore points for any branch
+- **Organization Scoping** — Multi-tenant with API key authentication
+- **Usage-Based Billing** — Free tier included, pay only for what you use
+
+## Quick Example
+
+```bash
+# Create a repository
+curl -X POST https://api.coregit.dev/v1/repos \
+  -H "x-api-key: YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"slug": "my-repo", "visibility": "private"}'
+
+# Commit files
+curl -X POST https://api.coregit.dev/v1/repos/my-repo/commits \
+  -H "x-api-key: YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "branch": "main",
+    "message": "Initial commit",
+    "actions": [
+      {"action": "add", "path": "README.md", "content": "# Hello World"}
+    ]
+  }'
+
+# Clone with standard Git
+git clone https://orgslug:YOUR_KEY@api.coregit.dev/orgslug/my-repo.git
+```
+
+## Next Steps
+
+- [Getting Started](/docs/getting-started) — Set up your first repository
+- [API Reference](/docs/api-reference) — Complete endpoint documentation
+- [Git Protocol](/docs/git-protocol) — Using standard Git with Coregit

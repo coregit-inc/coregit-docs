@@ -1,0 +1,32 @@
+---
+title: Git Smart HTTP
+description: Use standard Git commands with Coregit repositories.
+---
+
+## Overview
+
+Coregit implements the Git Smart HTTP protocol, so you can use any standard Git client to clone, fetch, and push.
+
+## Repository URL Format
+
+```
+https://{org-slug}:{api-key}@api.coregit.dev/{org-slug}/{repo-slug}.git
+```
+
+## Supported Operations
+
+| Operation | Auth Required | Command |
+|-----------|--------------|---------|
+| Clone (public) | No | `git clone https://api.coregit.dev/org/repo.git` |
+| Clone (private) | Yes | `git clone https://org:KEY@api.coregit.dev/org/repo.git` |
+| Fetch | Same as clone | `git fetch origin` |
+| Push | Always | `git push origin main` |
+
+## Endpoints
+
+The Git protocol uses two endpoints under the hood:
+
+- `GET /:org/:repo.git/info/refs?service=git-upload-pack` — Ref advertisement (clone/fetch)
+- `POST /:org/:repo.git/git-upload-pack` — Pack data transfer (clone/fetch)
+- `GET /:org/:repo.git/info/refs?service=git-receive-pack` — Ref advertisement (push)
+- `POST /:org/:repo.git/git-receive-pack` — Pack data transfer (push)

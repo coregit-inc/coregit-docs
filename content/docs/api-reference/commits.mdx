@@ -1,0 +1,71 @@
+---
+title: Commits
+description: Create multi-file commits and browse commit history via the API.
+---
+
+## Create Commit
+
+This is the core endpoint — create a commit with multiple file changes in a single call.
+
+```http
+POST /v1/repos/:slug/commits
+```
+
+```json
+{
+  "branch": "main",
+  "message": "Add homepage and config",
+  "parent_sha": "abc123...",
+  "actions": [
+    {
+      "action": "add",
+      "path": "index.html",
+      "content": "<h1>Hello</h1>"
+    },
+    {
+      "action": "add",
+      "path": "config.json",
+      "content": "{\"version\": 1}",
+      "encoding": "utf-8"
+    },
+    {
+      "action": "delete",
+      "path": "old-file.txt"
+    }
+  ]
+}
+```
+
+### Actions
+
+| Action | Description |
+|--------|-------------|
+| `add` | Create a new file |
+| `modify` | Update an existing file |
+| `delete` | Remove a file |
+
+### Fields
+
+- `branch` — Target branch name
+- `message` — Commit message
+- `parent_sha` — (optional) Expected head SHA for CAS conflict detection
+- `actions[].encoding` — `utf-8` (default) or `base64` for binary files
+
+### Limits
+
+- Max **1,000 files** per commit
+- Max **10 MB** per file
+
+## List Commits
+
+```http
+GET /v1/repos/:slug/commits?branch=main&page=1&per_page=20
+```
+
+## Get Commit
+
+```http
+GET /v1/repos/:slug/commits/:sha
+```
+
+Returns commit metadata, parent SHAs, and tree SHA.

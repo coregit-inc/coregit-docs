@@ -1,0 +1,41 @@
+---
+title: Diff
+description: Compare two refs and see file-level changes.
+---
+
+## Compare Refs
+
+```http
+GET /v1/repos/:slug/diff?base=main&head=feature-x
+```
+
+Returns the list of changed files with stats:
+
+```json
+{
+  "files": [
+    {
+      "path": "src/index.ts",
+      "status": "modified",
+      "additions": 12,
+      "deletions": 3
+    },
+    {
+      "path": "README.md",
+      "status": "added",
+      "additions": 5,
+      "deletions": 0
+    }
+  ],
+  "total_additions": 17,
+  "total_deletions": 3
+}
+```
+
+### File Statuses
+
+| Status | Meaning |
+|--------|---------|
+| `added` | New file in head |
+| `modified` | Changed between base and head |
+| `deleted` | Removed in head |
