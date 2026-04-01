@@ -23,8 +23,7 @@ All responses return JSON. Successful responses use `2xx` status codes. Errors f
 
 ```json
 {
-  "error": "not_found",
-  "message": "Repository not found"
+  "error": "Repository not found"
 }
 ```
 
@@ -42,11 +41,14 @@ All responses return JSON. Successful responses use `2xx` status codes. Errors f
 
 ## Pagination
 
-List endpoints accept `page` and `per_page` query parameters:
+List endpoints accept `limit` and `offset` query parameters:
 
 ```bash
-GET /v1/repos?page=1&per_page=20
+GET /v1/repos?limit=20&offset=0
 ```
+
+- `limit` — Number of items to return (varies by endpoint, typically max 100)
+- `offset` — Number of items to skip (default: 0)
 
 ## Rate Limits
 

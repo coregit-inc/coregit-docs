@@ -16,12 +16,28 @@ POST /v1/repos/:slug/branches
 }
 ```
 
-The `from` field can be a branch name or a commit SHA.
+- `name` — Required. New branch name
+- `from` — Branch name to copy from (optional)
+- `from_sha` — Commit SHA to branch from (optional, use instead of `from`)
+
+If neither `from` nor `from_sha` is provided, branches from the default branch.
 
 ## List Branches
 
 ```http
 GET /v1/repos/:slug/branches
+```
+
+**Response** `200`:
+
+```json
+{
+  "branches": [
+    { "name": "main", "sha": "7f3b..." },
+    { "name": "feature-x", "sha": "a1c2..." }
+  ],
+  "default_branch": "main"
+}
 ```
 
 ## Get Branch
@@ -46,10 +62,25 @@ You cannot delete the default branch.
 POST /v1/repos/:slug/branches/:name/merge
 ```
 
+The `:name` in the URL is the **source branch**. The request body specifies the **target**:
+
 ```json
 {
-  "source": "feature-x"
+  "target": "main"
 }
 ```
 
-Currently supports **fast-forward merges only**. Returns `409` if the merge cannot be fast-forwarded.
+- `target` — Branch to merge into (optional, defaults to repo's default branch)
+- `strategy` — Merge strategy (optional, currently only fast-forward is supported)
+
+**Response** `200`:
+
+```json
+{
+  "merged": true,
+  "sha": "7f3b...",
+  "strategy": "fast-forward"
+}
+```
+
+Returns `409` if the merge cannot be fast-forwarded.

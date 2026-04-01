@@ -14,9 +14,16 @@ POST /v1/repos
   "slug": "my-repo",
   "description": "An example repository",
   "visibility": "private",
-  "default_branch": "main"
+  "default_branch": "main",
+  "init": true
 }
 ```
+
+- `slug` — Required. Lowercase letters, numbers, and hyphens (1–100 chars)
+- `description` — Optional (max 500 chars)
+- `visibility` — `"public"` or `"private"` (default: `"private"`)
+- `default_branch` — Default: `"main"`
+- `init` — Create an initial empty commit (default: `true`)
 
 **Response** `201`:
 
@@ -27,6 +34,8 @@ POST /v1/repos
   "description": "An example repository",
   "visibility": "private",
   "default_branch": "main",
+  "git_url": "https://api.coregit.dev/myorg/my-repo.git",
+  "api_url": "https://api.coregit.dev/v1/repos/my-repo",
   "created_at": "2025-01-01T00:00:00Z"
 }
 ```
@@ -34,10 +43,28 @@ POST /v1/repos
 ## List Repositories
 
 ```http
-GET /v1/repos?page=1&per_page=20
+GET /v1/repos?limit=50&offset=0
 ```
 
-Returns an array of repository objects.
+**Response** `200`:
+
+```json
+{
+  "repos": [
+    {
+      "id": "repo_abc123",
+      "slug": "my-repo",
+      "description": "An example repository",
+      "default_branch": "main",
+      "visibility": "private",
+      "created_at": "2025-01-01T00:00:00Z",
+      "updated_at": "2025-01-02T00:00:00Z"
+    }
+  ],
+  "limit": 50,
+  "offset": 0
+}
+```
 
 ## Get Repository
 
@@ -45,7 +72,7 @@ Returns an array of repository objects.
 GET /v1/repos/:slug
 ```
 
-Returns the repository object with an `is_empty` flag.
+Returns the full repository object including `is_empty`, `git_url`, and `api_url`.
 
 ## Update Repository
 
@@ -60,6 +87,8 @@ PATCH /v1/repos/:slug
   "default_branch": "develop"
 }
 ```
+
+All fields are optional.
 
 ## Delete Repository
 

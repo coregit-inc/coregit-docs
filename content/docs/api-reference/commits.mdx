@@ -62,7 +62,29 @@ Each entry in `changes` creates or updates a file by default. Set `action: "dele
 ## List Commits
 
 ```http
-GET /v1/repos/:slug/commits?branch=main&page=1&per_page=20
+GET /v1/repos/:slug/commits?ref=main&limit=20
+```
+
+- `ref` (or `branch`) — Branch name, tag, or SHA (default: repo's default branch)
+- `limit` — Max results (default: 20, max: 100)
+
+**Response** `200`:
+
+```json
+{
+  "commits": [
+    {
+      "sha": "7f3b...",
+      "message": "Add login page",
+      "author_name": "Agent",
+      "author_email": "agent@example.com",
+      "timestamp": 1704067200,
+      "parents": ["abc1..."]
+    }
+  ],
+  "ref": "main",
+  "has_more": false
+}
 ```
 
 ## Get Commit
@@ -71,4 +93,16 @@ GET /v1/repos/:slug/commits?branch=main&page=1&per_page=20
 GET /v1/repos/:slug/commits/:sha
 ```
 
-Returns commit metadata, parent SHAs, and tree SHA.
+**Response** `200`:
+
+```json
+{
+  "sha": "7f3b...",
+  "message": "Add login page",
+  "tree": "a1c2...",
+  "author_name": "Agent",
+  "author_email": "agent@example.com",
+  "timestamp": 1704067200,
+  "parents": ["abc1..."]
+}
+```

@@ -9,24 +9,27 @@ description: Compare two refs and see file-level changes.
 GET /v1/repos/:slug/diff?base=main&head=feature-x
 ```
 
-Returns the list of changed files with stats:
+**Response** `200`:
 
 ```json
 {
+  "base": "7f3b...",
+  "head": "a1c2...",
   "files": [
     {
       "path": "src/index.ts",
       "status": "modified",
-      "additions": 12,
-      "deletions": 3
+      "old_sha": "d4e5...",
+      "new_sha": "f6a7..."
     },
     {
       "path": "README.md",
       "status": "added",
-      "additions": 5,
-      "deletions": 0
+      "old_sha": null,
+      "new_sha": "b2c3..."
     }
   ],
+  "total_files_changed": 2,
   "total_additions": 17,
   "total_deletions": 3
 }
@@ -38,4 +41,6 @@ Returns the list of changed files with stats:
 |--------|---------|
 | `added` | New file in head |
 | `modified` | Changed between base and head |
-| `deleted` | Removed in head |
+| `removed` | Deleted in head |
+
+Each file entry includes `old_sha` and `new_sha` (the blob SHAs before and after). `null` when the file didn't exist on that side.

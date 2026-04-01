@@ -9,16 +9,23 @@ description: Browse directory trees and read file contents via the API.
 GET /v1/repos/:slug/tree/:ref/*path
 ```
 
-Returns an array of entries in the directory:
+The `:ref` can be a branch name, tag, or commit SHA.
+
+**Response** `200`:
 
 ```json
-[
-  { "name": "src", "type": "tree" },
-  { "name": "README.md", "type": "blob", "size": 1024 }
-]
+{
+  "items": [
+    { "name": "src", "path": "src", "type": "folder", "sha": "a1c2...", "mode": "040000" },
+    { "name": "README.md", "path": "README.md", "type": "file", "sha": "7f3b...", "mode": "100644" }
+  ],
+  "path": "",
+  "ref": "main",
+  "sha": "d4e5..."
+}
 ```
 
-The `:ref` can be a branch name, tag, or commit SHA.
+Entry types are `"folder"` or `"file"`.
 
 ## Read File
 
@@ -28,13 +35,19 @@ GET /v1/repos/:slug/blob/:ref/*path
 
 Returns the file content. Binary files are returned as base64. Max file size: **50 MB**.
 
+**Response** `200`:
+
 ```json
 {
   "content": "# Hello World\n",
   "encoding": "utf-8",
+  "path": "README.md",
+  "sha": "7f3b...",
   "size": 15
 }
 ```
+
+Supports `ETag` / `If-None-Match` for caching.
 
 ## List Refs
 
@@ -42,4 +55,16 @@ Returns the file content. Binary files are returned as base64. Max file size: **
 GET /v1/repos/:slug/refs
 ```
 
-Returns all branches and tags with their head SHAs.
+Returns all branches and tags with their head SHAs:
+
+```json
+{
+  "branches": [
+    { "name": "main", "sha": "7f3b...", "type": "branch" }
+  ],
+  "tags": [
+    { "name": "v1.0", "sha": "a1c2...", "type": "tag" }
+  ],
+  "default_branch": "main"
+}
+```
