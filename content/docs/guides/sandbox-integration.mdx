@@ -87,9 +87,9 @@ if (testResult.exitCode === 0) {
     body: JSON.stringify({
       branch: 'main',
       message: `feat: ${description}`,
-      actions: [
-        { action: 'modify', path: 'src/app.ts', content: appCode.stdout },
-        { action: 'modify', path: 'src/app.test.ts', content: testCode.stdout },
+      changes: [
+        { path: 'src/app.ts', content: appCode.stdout },
+        { path: 'src/app.test.ts', content: testCode.stdout },
       ],
     }),
   });
@@ -125,8 +125,8 @@ await fetch('https://api.coregit.dev/v1/repos/my-project/commits', {
     branch: 'main',
     message: 'scaffold project',
     actions: [
-      { action: 'add', path: 'package.json', content: packageJson },
-      { action: 'add', path: 'tsconfig.json', content: tsconfig },
+      { path: 'package.json', content: packageJson },
+      { path: 'tsconfig.json', content: tsconfig },
     ],
   }),
 });

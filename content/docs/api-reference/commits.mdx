@@ -16,40 +16,43 @@ POST /v1/repos/:slug/commits
   "branch": "main",
   "message": "Add homepage and config",
   "parent_sha": "abc123...",
-  "actions": [
+  "author": { "name": "Agent", "email": "agent@example.com" },
+  "changes": [
     {
-      "action": "add",
       "path": "index.html",
       "content": "<h1>Hello</h1>"
     },
     {
-      "action": "add",
       "path": "config.json",
       "content": "{\"version\": 1}",
       "encoding": "utf-8"
     },
     {
-      "action": "delete",
-      "path": "old-file.txt"
+      "path": "old-file.txt",
+      "action": "delete"
     }
   ]
 }
 ```
 
-### Actions
+### Changes
 
-| Action | Description |
-|--------|-------------|
-| `add` | Create a new file |
-| `modify` | Update an existing file |
-| `delete` | Remove a file |
+Each entry in `changes` creates or updates a file by default. Set `action: "delete"` to remove a file.
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `path` | Yes | File path (no traversal) |
+| `content` | No | File content (required unless deleting) |
+| `encoding` | No | `utf-8` (default) or `base64` |
+| `action` | No | Set to `"delete"` to remove the file |
 
 ### Fields
 
 - `branch` — Target branch name
 - `message` — Commit message
+- `author` — `{ name, email }` for the commit author
 - `parent_sha` — (optional) Expected head SHA for CAS conflict detection
-- `actions[].encoding` — `utf-8` (default) or `base64` for binary files
+- `changes[].encoding` — `utf-8` (default) or `base64` for binary files
 
 ### Limits
 

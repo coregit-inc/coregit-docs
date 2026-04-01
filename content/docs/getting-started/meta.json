@@ -1,4 +1,4 @@
 {
   "title": "Getting Started",
-  "pages": ["index", "authentication"]
+  "pages": ["index", "authentication", "typescript-sdk"]
 }

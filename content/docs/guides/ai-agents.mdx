@@ -49,9 +49,8 @@ const commitRes = await fetch(
     body: JSON.stringify({
       branch: 'main',
       message: 'feat: implement user authentication',
-      actions: [
+      changes: [
         {
-          action: 'add',
           path: 'src/auth.ts',
           content: `import { hash, verify } from './crypto';
 
@@ -64,7 +63,6 @@ export async function authenticate(email: string, password: string) {
 }`,
         },
         {
-          action: 'add',
           path: 'src/middleware.ts',
           content: `import { authenticate } from './auth';
 
@@ -80,7 +78,6 @@ export async function authMiddleware(req, res, next) {
 }`,
         },
         {
-          action: 'modify',
           path: 'src/index.ts',
           content: `import { authMiddleware } from './middleware';
 
@@ -161,8 +158,8 @@ const commitRes = await fetch(
       branch: 'main',
       message: 'update config',
       parent_sha: currentHead, // Will return 409 if branch moved
-      actions: [
-        { action: 'modify', path: 'config.json', content: '{"v": 2}' },
+      changes: [
+        { path: 'config.json', content: '{"v": 2}' },
       ],
     }),
   }
@@ -231,6 +228,6 @@ class CoregitClient {
 const git = new CoregitClient(process.env.COREGIT_API_KEY!);
 await git.createRepo('my-project');
 await git.commit('my-project', 'main', 'init', [
-  { action: 'add', path: 'README.md', content: '# Hello' },
+  { path: 'README.md', content: '# Hello' },
 ]);
 ```

@@ -29,8 +29,8 @@ curl -X POST https://api.coregit.dev/v1/repos/hello-world/commits \
   -d '{
     "branch": "main",
     "message": "Add README",
-    "actions": [
-      {"action": "add", "path": "README.md", "content": "# Hello from Coregit"}
+    "changes": [
+      {"path": "README.md", "content": "# Hello from Coregit"}
     ]
   }'
 ```

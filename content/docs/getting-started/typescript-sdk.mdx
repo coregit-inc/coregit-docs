@@ -1,0 +1,306 @@
+---
+title: TypeScript SDK
+description: Install and use the official @strayl/coregit SDK for typed access to the Coregit API.
+---
+
+## Installation
+
+```bash
+npm install @strayl/coregit
+```
+
+## Quick Start
+
+```typescript
+import { createCoregitClient } from "@strayl/coregit";
+
+const git = createCoregitClient({
+  apiKey: process.env.COREGIT_API_KEY!,
+});
+
+// Create a repo
+const { data: repo, error } = await git.repos.create({
+  slug: "my-project",
+  visibility: "private",
+});
+
+if (error) {
+  console.error(error.message); // e.g. "slug already exists"
+} else {
+  console.log(repo.git_url); // https://api.coregit.dev/org/my-project.git
+}
+```
+
+## Result Pattern
+
+Every method returns `CoregitResult<T>`:
+
+```typescript
+interface CoregitResult<T> {
+  data: T | null;    // Response payload on success
+  error: CoregitError | null; // Error details on failure
+  status: number;    // HTTP status code
+}
+```
+
+Check `error` before using `data`:
+
+```typescript
+const { data, error } = await git.repos.get("my-project");
+
+if (error) {
+  if (error.status === 404) {
+    // repo doesn't exist
+  }
+  throw new Error(error.message);
+}
+
+console.log(data.default_branch); // "main"
+```
+
+## Configuration
+
+```typescript
+const git = createCoregitClient({
+  apiKey: "cgk_live_...",       // Required
+  baseUrl: "https://api.coregit.dev", // Optional (default)
+  fetch: customFetch,           // Optional — custom fetch implementation
+});
+```
+
+The `fetch` option is useful for environments without a global `fetch` (older Node.js) or for testing with a mock.
+
+## Repos
+
+```typescript
+// Create
+const { data } = await git.repos.create({
+  slug: "my-repo",
+  description: "A test repo",
+  visibility: "private",
+  default_branch: "main",
+});
+
+// List
+const { data } = await git.repos.list({ limit: 20, offset: 0 });
+console.log(data.repos); // Repo[]
+
+// Get
+const { data } = await git.repos.get("my-repo");
+console.log(data.is_empty); // boolean
+
+// Update
+const { data } = await git.repos.update("my-repo", {
+  description: "Updated",
+  visibility: "public",
+});
+
+// Delete
+const { data } = await git.repos.delete("my-repo");
+console.log(data.deleted); // true
+```
+
+## Commits
+
+The core feature — create multi-file commits in a single call.
+
+```typescript
+const { data: commit } = await git.commits.create("my-repo", {
+  branch: "main",
+  message: "feat: add authentication",
+  author: { name: "AI Agent", email: "agent@example.com" },
+  changes: [
+    // Create or update a file (provide content)
+    { path: "src/auth.ts", content: "export function login() { ... }" },
+
+    // Binary file (base64)
+    { path: "logo.png", content: base64Data, encoding: "base64" },
+
+    // Delete a file
+    { path: "old-config.json", action: "delete" },
+  ],
+});
+
+console.log(commit.sha); // "7f3b..."
+```
+
+### Conflict Detection
+
+Use `parent_sha` to detect concurrent changes:
+
+```typescript
+// Get current head
+const { data: branch } = await git.branches.get("my-repo", "main");
+
+const { data, error } = await git.commits.create("my-repo", {
+  branch: "main",
+  message: "update config",
+  author: { name: "Agent", email: "agent@example.com" },
+  parent_sha: branch.sha, // Returns 409 if branch moved
+  changes: [{ path: "config.json", content: '{"v": 2}' }],
+});
+
+if (error?.status === 409) {
+  // Branch was updated — re-read and retry
+}
+```
+
+### List & Get
+
+```typescript
+// List commits on a branch
+const { data } = await git.commits.list("my-repo", {
+  ref: "main",
+  limit: 50,
+});
+console.log(data.commits); // Commit[]
+console.log(data.has_more); // boolean
+
+// Get single commit
+const { data } = await git.commits.get("my-repo", "7f3b...");
+console.log(data.parents); // string[]
+```
+
+## Branches
+
+```typescript
+// Create from branch name
+await git.branches.create("my-repo", { name: "feature-x", from: "main" });
+
+// Create from specific SHA
+await git.branches.create("my-repo", { name: "hotfix", from_sha: "abc123" });
+
+// List
+const { data } = await git.branches.list("my-repo");
+console.log(data.branches); // Branch[]
+console.log(data.default_branch); // "main"
+
+// Get
+const { data } = await git.branches.get("my-repo", "feature-x");
+console.log(data.sha); // head commit SHA
+
+// Merge (fast-forward only)
+const { data } = await git.branches.merge("my-repo", "feature-x", {
+  target: "main",
+});
+console.log(data.strategy); // "fast-forward" | "already_up_to_date"
+
+// Delete
+await git.branches.delete("my-repo", "feature-x");
+```
+
+## Files
+
+```typescript
+// Browse directory
+const { data } = await git.files.tree("my-repo", "main", "src");
+for (const entry of data.items) {
+  console.log(entry.name, entry.type); // "auth.ts" "file"
+}
+
+// Read file
+const { data } = await git.files.blob("my-repo", "main", "src/auth.ts");
+console.log(data.content); // file content (utf-8 or base64)
+console.log(data.encoding); // "utf-8" | "base64"
+console.log(data.size); // bytes
+
+// List all refs (branches + tags)
+const { data } = await git.files.refs("my-repo");
+console.log(data.branches); // Ref[]
+console.log(data.tags); // Ref[]
+```
+
+## Diff
+
+```typescript
+const { data } = await git.diff.compare("my-repo", "main", "feature-x");
+
+console.log(data.total_files_changed); // 3
+for (const file of data.files) {
+  console.log(file.path, file.status); // "src/auth.ts" "modified"
+}
+```
+
+## Snapshots
+
+Named restore points for branches.
+
+```typescript
+// Create before risky changes
+await git.snapshots.create("my-repo", {
+  name: "before-refactor",
+  branch: "main",
+  metadata: { agent: "claude", task: "refactor-auth" },
+});
+
+// List
+const { data } = await git.snapshots.list("my-repo");
+
+// Restore if something breaks
+const { data } = await git.snapshots.restore("my-repo", "before-refactor", {
+  target_branch: "main",
+});
+console.log(data.sha); // restored commit SHA
+
+// Clean up
+await git.snapshots.delete("my-repo", "before-refactor");
+```
+
+## Usage
+
+```typescript
+// Current month summary
+const { data } = await git.usage.summary();
+console.log(data.api_calls); // 4521
+console.log(data.storage_bytes); // 5242880
+
+// Specific month
+const { data } = await git.usage.summary("2025-03");
+
+// Detailed events
+const { data } = await git.usage.details({ limit: 100 });
+for (const event of data.events) {
+  console.log(event.event_type, event.quantity);
+}
+```
+
+## Full Example: AI Agent Workflow
+
+```typescript
+import { createCoregitClient } from "@strayl/coregit";
+
+const git = createCoregitClient({ apiKey: process.env.COREGIT_API_KEY! });
+
+// 1. Create repo
+await git.repos.create({ slug: "agent-output" });
+
+// 2. Commit generated code
+await git.commits.create("agent-output", {
+  branch: "main",
+  message: "feat: implement auth",
+  author: { name: "AI Agent", email: "agent@example.com" },
+  changes: [
+    { path: "src/auth.ts", content: authCode },
+    { path: "src/middleware.ts", content: middlewareCode },
+  ],
+});
+
+// 3. Snapshot before risky refactor
+await git.snapshots.create("agent-output", {
+  name: "pre-refactor",
+  branch: "main",
+});
+
+// 4. Attempt refactor
+const { error } = await git.commits.create("agent-output", {
+  branch: "main",
+  message: "refactor: simplify auth",
+  author: { name: "AI Agent", email: "agent@example.com" },
+  changes: [{ path: "src/auth.ts", content: refactoredCode }],
+});
+
+// 5. Restore if it broke
+if (error) {
+  await git.snapshots.restore("agent-output", "pre-refactor");
+}
+```

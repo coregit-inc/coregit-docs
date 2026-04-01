@@ -31,8 +31,8 @@ curl -X POST https://api.coregit.dev/v1/repos/my-repo/commits \
   -d '{
     "branch": "main",
     "message": "Initial commit",
-    "actions": [
-      {"action": "add", "path": "README.md", "content": "# Hello World"}
+    "changes": [
+      {"path": "README.md", "content": "# Hello World"}
     ]
   }'
 
