@@ -85,6 +85,18 @@ The `:name` in the URL is the **source branch**. The request body specifies the 
 | `merge-commit` | Creates a merge commit with two parents. Supports diverged branches with 3-way auto-merge |
 | `squash` | Applies all changes as a single new commit on the target. No merge history |
 
+### Already Up-to-Date
+
+If source and target point to the same commit, all strategies return immediately:
+
+```json
+{
+  "merged": true,
+  "sha": "7f3b...",
+  "strategy": "already_up_to_date"
+}
+```
+
 ### Fast-Forward Response
 
 **Response** `200`:
