@@ -1,0 +1,119 @@
+---
+title: Custom Domains
+description: Connect your own domain to Coregit so your users see git.yourproduct.com instead of api.coregit.dev.
+---
+
+## Overview
+
+Custom domains let you white-label Coregit's Git and API endpoints under your own domain. Instead of:
+
+```
+git clone https://api.coregit.dev/acme/my-app.git
+```
+
+Your users see:
+
+```
+git clone https://git.yourproduct.com/my-app.git
+```
+
+All Git Smart HTTP operations (clone, push, pull) and REST API calls work on your custom domain with full SSL.
+
+## Requirements
+
+- **Usage plan** — custom domains are not available on the Free tier
+- **$49/month add-on** — billed with your existing Usage subscription
+- A domain you control with access to DNS settings
+
+## Setup
+
+### 1. Add your domain
+
+Go to **Dashboard → Domain** and click **Add Custom Domain — $49/mo**.
+
+Enter your domain (e.g., `git.yourproduct.com`) in the dialog and confirm. The prorated charge for the current billing cycle is shown before you confirm.
+
+### 2. Configure DNS
+
+After adding the domain, you'll see a DNS configuration table:
+
+| Type   | Name  | Value              |
+|--------|-------|--------------------|
+| CNAME  | `git` | `custom.coregit.dev` |
+
+Add this CNAME record at your DNS provider. If you're using Cloudflare, make sure the record is set to **DNS only** (grey cloud), not Proxied.
+
+### 3. Wait for verification
+
+SSL certificates are provisioned automatically once the CNAME is detected. This usually takes 1–5 minutes. Click **Verify** to check the status.
+
+Once active, all traffic to your domain is routed to your Coregit organization with full TLS.
+
+## How it works
+
+On your custom domain, the organization prefix is removed from URLs — the domain itself identifies your org:
+
+### Git operations
+
+```bash
+# Standard Coregit URL
+git clone https://api.coregit.dev/acme/my-app.git
+
+# Custom domain — no org prefix
+git clone https://git.yourproduct.com/my-app.git
+```
+
+Push works the same way. Authentication still uses your API key via HTTP Basic auth:
+
+```bash
+git push https://git.yourproduct.com/my-app.git
+# Username: anything
+# Password: your API key
+```
+
+### REST API
+
+```bash
+# Standard
+curl https://api.coregit.dev/v1/repos \
+  -H 'x-api-key: cgk_live_...'
+
+# Custom domain
+curl https://git.yourproduct.com/v1/repos \
+  -H 'x-api-key: cgk_live_...'
+```
+
+All `/v1/*` endpoints work identically on your custom domain. The `git_url` field in API responses automatically uses your custom domain.
+
+## Billing
+
+- **$49/month per domain**, prorated when added mid-cycle
+- Billed as an add-on to your Usage subscription
+- When removed, the charge is removed from your next billing cycle (unused time is credited to your subscription)
+- If your Usage subscription is cancelled, the custom domain enters a 7-day grace period before being removed
+
+## Removing a domain
+
+Go to **Dashboard → Domain** and click the delete icon. A confirmation dialog explains that Git operations on the domain will stop immediately.
+
+The $49/month addon charge is removed from your next billing cycle.
+
+## DNS provider notes
+
+### Cloudflare
+
+Set the CNAME record to **DNS only** (grey cloud icon). If Proxied is enabled, Cloudflare will try to terminate TLS on their end which conflicts with Coregit's certificate provisioning.
+
+### Other providers
+
+Standard CNAME records work with any DNS provider. No special configuration needed — just point the subdomain to `custom.coregit.dev`.
+
+### Apex domains
+
+Apex domains (e.g., `yourproduct.com` without a subdomain) cannot use CNAME records per the DNS spec. Use a subdomain like `git.yourproduct.com` or `api.yourproduct.com` instead.
+
+## Limits
+
+- One custom domain per organization (contact us if you need more)
+- Subdomain only — apex domains are not supported
+- Domain must not be a `coregit.dev` subdomain
