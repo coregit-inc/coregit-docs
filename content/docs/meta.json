@@ -1,13 +1,9 @@
 {
   "pages": [
     "index",
-    "---Getting Started---",
     "getting-started",
-    "---API Reference---",
     "api-reference",
-    "---Git Protocol---",
     "git-protocol",
-    "---Guides---",
     "guides"
   ]
 }
