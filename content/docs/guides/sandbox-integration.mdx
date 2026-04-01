@@ -1,51 +1,155 @@
 ---
 title: Sandbox Integration
-description: Integrate Coregit with sandboxed development environments.
+description: Use Coregit with cloud sandboxes like Daytona, E2B, or CodeSandbox for AI-powered development.
 ---
 
 ## Overview
 
-Coregit pairs well with cloud sandboxes (Daytona, E2B, CodeSandbox) where AI agents write and test code. The workflow:
+Cloud sandboxes give AI agents a real execution environment. Coregit provides the version control layer. Together, they enable a complete AI coding workflow:
 
-1. Agent writes code in the sandbox
-2. Code is committed to Coregit via the API
-3. Users can clone the result locally or in their IDE
+1. Agent writes and tests code in the sandbox
+2. Working code is committed to Coregit
+3. Users clone the result with standard Git
 
-## Setup
+## Architecture
 
-```bash
-# Inside the sandbox, clone the Coregit repo
-git clone https://org:KEY@api.coregit.dev/org/repo.git workspace
-cd workspace
+```
+┌─────────────┐     ┌──────────────┐     ┌─────────────┐
+│   AI Agent   │────▶│   Sandbox    │────▶│   Coregit   │
+│  (LLM API)  │     │ (Daytona/E2B)│     │  (Git API)  │
+└─────────────┘     └──────────────┘     └─────────────┘
+                          │                      │
+                     Run & test              git clone
+                          │                      │
+                     ┌────▼────┐           ┌─────▼─────┐
+                     │ Preview │           │   User    │
+                     └─────────┘           └───────────┘
 ```
 
-## Committing from Sandbox
+## Setup: Clone into Sandbox
 
-You can use either standard `git push` or the API:
-
-### Option A: Git Push
+When creating a sandbox, clone the Coregit repo as the workspace:
 
 ```bash
-git add -A
-git commit -m "Agent changes"
-git push origin main
+# Inside sandbox initialization script
+git clone https://myorg:$COREGIT_KEY@api.coregit.dev/myorg/my-project.git /workspace
+cd /workspace
 ```
 
-### Option B: API Commit
+## Option A: Git Push from Sandbox
 
-```bash
-# Read file contents and commit via API
-curl -X POST https://api.coregit.dev/v1/repos/repo/commits \
-  -H "x-api-key: $COREGIT_KEY" \
-  -H "Content-Type: application/json" \
-  -d @commit-payload.json
+If the sandbox has `git` installed, push changes directly:
+
+```typescript
+// Agent generates code in sandbox
+await sandbox.exec('cat > /workspace/src/app.ts << EOF\n' + generatedCode + '\nEOF');
+
+// Run tests
+const testResult = await sandbox.exec('cd /workspace && npm test');
+
+if (testResult.exitCode === 0) {
+  // Tests pass — commit and push
+  await sandbox.exec(`
+    cd /workspace &&
+    git add -A &&
+    git commit -m "feat: ${description}" &&
+    git push origin main
+  `);
+}
 ```
 
-The API approach is better for agents that generate files programmatically without a filesystem.
+**Pros:** Simple, uses standard Git workflow.
+**Cons:** Requires `git` binary in sandbox, sequential file operations.
+
+## Option B: API Commit from Sandbox
+
+Read files from sandbox, commit via Coregit API:
+
+```typescript
+// Agent generates code in sandbox
+await sandbox.exec('cat > /workspace/src/app.ts << EOF\n' + generatedCode + '\nEOF');
+
+// Run tests
+const testResult = await sandbox.exec('cd /workspace && npm test');
+
+if (testResult.exitCode === 0) {
+  // Read the changed files
+  const appCode = await sandbox.exec('cat /workspace/src/app.ts');
+  const testCode = await sandbox.exec('cat /workspace/src/app.test.ts');
+
+  // Commit via API
+  await fetch('https://api.coregit.dev/v1/repos/my-project/commits', {
+    method: 'POST',
+    headers: {
+      'x-api-key': process.env.COREGIT_API_KEY,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      branch: 'main',
+      message: `feat: ${description}`,
+      actions: [
+        { action: 'modify', path: 'src/app.ts', content: appCode.stdout },
+        { action: 'modify', path: 'src/app.test.ts', content: testCode.stdout },
+      ],
+    }),
+  });
+}
+```
+
+**Pros:** No `git` binary needed, atomic multi-file commit.
+**Cons:** Need to read files individually.
+
+## Option C: Hybrid — API for Init, Git for Iteration
+
+Best of both worlds for iterative agent workflows:
+
+```typescript
+// 1. Create repo via API
+await fetch('https://api.coregit.dev/v1/repos', {
+  method: 'POST',
+  headers: {
+    'x-api-key': process.env.COREGIT_API_KEY,
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({ slug: 'my-project', visibility: 'private' }),
+});
+
+// 2. Scaffold via API commit (before sandbox exists)
+await fetch('https://api.coregit.dev/v1/repos/my-project/commits', {
+  method: 'POST',
+  headers: {
+    'x-api-key': process.env.COREGIT_API_KEY,
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({
+    branch: 'main',
+    message: 'scaffold project',
+    actions: [
+      { action: 'add', path: 'package.json', content: packageJson },
+      { action: 'add', path: 'tsconfig.json', content: tsconfig },
+    ],
+  }),
+});
+
+// 3. Start sandbox with repo cloned
+const sandbox = await createSandbox({
+  command: 'git clone https://org:KEY@api.coregit.dev/org/my-project.git /workspace',
+});
+
+// 4. Agent iterates using git push inside sandbox
+for (const task of tasks) {
+  await sandbox.exec(`cat > /workspace/${task.path} << 'EOF'\n${task.code}\nEOF`);
+  const result = await sandbox.exec('cd /workspace && npm test');
+  if (result.exitCode === 0) {
+    await sandbox.exec(`cd /workspace && git add -A && git commit -m "${task.message}" && git push origin main`);
+  }
+}
+```
 
 ## When to Use Each
 
 | Approach | Best For |
 |----------|----------|
-| Git push | Sandbox with filesystem + git binary |
-| API commit | Serverless functions, no filesystem access |
+| Git push | Sandbox with git binary, iterative changes |
+| API commit | Serverless functions, no filesystem, batch operations |
+| Hybrid | Full projects — scaffold via API, iterate via git |
