@@ -1,0 +1,71 @@
+---
+title: ROI & Benchmarks
+description: Executive intro, savings math, and current benchmark data for Coregit.
+---
+
+## Executive intro
+
+Coregit is a serverless Git hosting platform built for AI agents and automated workflows, with single-call API commits, standard Git protocol support, snapshots, and usage-based billing instead of seat licenses.
+
+## Savings model
+
+### Single-call commits eliminate HTTP chatter
+
+The API can commit N files in a single request, while GitHub's REST API still needs 7-14 calls for the same change set. Removing 13 HTTP round trips per 10-file commit reclaims measurable sandbox or agent time.
+
+| Workload (10-file commits/day) | HTTP requests avoided/day | Worker hours freed/month | Sandbox $ saved/month (@$1.50/h) |
+| --- | --- | --- | --- |
+| 5,000 | 65,000 | 108 h | $160 |
+| 15,000 | 195,000 | 325 h | $490 |
+| 50,000 | 650,000 | 1,083 h | $1,625 |
+
+<small>Assumptions: GitHub needs 14 REST calls for a 10-file commit vs 1 call on Coregit, Coregit's own repo-create latency (~200 ms) is used as the per-call baseline, and Daytona-class sandboxes cost $1-1.50 per hour of compute.</small>
+
+### Seatless usage pricing
+
+Usage tier pricing starts at $0.50 per private repository per month with unlimited API calls, storage, and git transfer above the free tier limits. Because there are no seat charges, automation-heavy orgs with dozens of service accounts pay only for actual repo footprint.
+
+| Org footprint | Legacy seat model* | Coregit usage tier | Monthly savings |
+| --- | --- | --- | --- |
+| 40 repos powering 20 humans + 20 agent identities | 40 seats * $4 = $160 | 40 repos * $0.50 = $20 | $140 |
+| 100 experiment repos managed by 8 engineers + 52 bots | 60 seats * $4 = $240 | 100 repos * $0.50 = $50 | $190 |
+
+<small>*GitHub Team public price of $4/seat/month. Actual competitor pricing may vary.</small>
+
+### Zero egress and serverless infra
+
+Coregit runs entirely on Cloudflare Workers and R2, so outbound bandwidth from the API and storage layer carries zero egress cost. A team mirroring 3 TB of clones or pulls per month would spend ~$270 on AWS S3 egress ($0.09/GB) but $0 on Coregit.
+
+### Combined ROI
+
+Even the mid workload (15k 10-file commits/day) combines ~$490 per month of sandbox time savings with ~$190 per month of seat/license savings, yielding ~$680 every month before counting avoided egress bills or the engineering time saved by snapshots and restore points.
+
+## Benchmarks
+
+### End-to-end latency snapshot
+
+| Operation | Estimate (p50) | Bottleneck |
+| --- | --- | --- |
+| Create repo | ~200 ms | 4 R2 writes + 1 DB insert |
+| API commit (3 files) | ~300 ms | Blob hashing + tree build + CAS ref update |
+| Read file | ~100 ms | 1 R2 read + decompress |
+| List repos | ~50 ms | Single DB query |
+| Clone (<100 MB) | ~500 ms | In-memory packfile generation |
+| Diff (100 files) | ~800 ms | Full tree walks + blob reads |
+
+### Microbench results (`npm run test:bench`, Apr 2, 2026)
+
+| Test | Scenario | Throughput (ops/s) | Delta |
+| --- | --- | --- | --- |
+| bytesToHex | Lookup table vs Array.from | 4,703,257 vs 724,596 | 6.5x faster |
+| Decompression (1 KB blob) | unzlibSync vs DecompressionStream | 5,450 vs 16,433 | Stream still 3.0x faster (needs revisit) |
+| Decompression (10 KB blob) | unzlibSync vs DecompressionStream | 5,823 vs 16,679 | Stream still 2.9x faster |
+| parseTree | 5 entries vs 50 entries | 476,722 vs 49,647 | Scaling gap 9.6x |
+| parseGitObject | 1 KB vs 10 KB blob | 1,994,568 vs 1,915,748 | ~1.04x delta |
+| sha1 | 1 KB vs 10 KB chunk | 44,859 vs 35,556 | 1.26x delta |
+
+### How to use these numbers
+
+- The end-to-end table provides the commit, read, and clone baselines to feed into planning models for AI agent throughput.
+- The microbench suite highlights where the current Worker spends CPU time (hex encoding is solved, decompression still needs iteration) so infra owners can focus on the largest multipliers.
+- Pair the request-count savings with repo-level pricing when sizing customer pitches or internal ROI reviews.
