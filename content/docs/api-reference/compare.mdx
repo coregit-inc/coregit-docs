@@ -7,6 +7,7 @@ description: Compare two refs — merge base, ahead/behind counts, file diffs, a
 
 ```http
 GET /v1/repos/:slug/compare?base=main&head=feature-x
+GET /v1/repos/:namespace/:slug/compare?base=main&head=feature-x
 ```
 
 Returns a full comparison between two refs: the merge base, how many commits each side is ahead/behind, file-level diffs with stats, and whether the head can be cleanly merged into the base.

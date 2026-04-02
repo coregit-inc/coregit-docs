@@ -7,6 +7,7 @@ description: Create named restore points and roll back branches.
 
 ```http
 POST /v1/repos/:slug/snapshots
+POST /v1/repos/:namespace/:slug/snapshots
 ```
 
 ```json
@@ -23,24 +24,28 @@ Captures the current head of the branch as a named restore point.
 
 ```http
 GET /v1/repos/:slug/snapshots
+GET /v1/repos/:namespace/:slug/snapshots
 ```
 
 ## Get Snapshot
 
 ```http
 GET /v1/repos/:slug/snapshots/:name
+GET /v1/repos/:namespace/:slug/snapshots/:name
 ```
 
 ## Delete Snapshot
 
 ```http
 DELETE /v1/repos/:slug/snapshots/:name
+DELETE /v1/repos/:namespace/:slug/snapshots/:name
 ```
 
 ## Restore Snapshot
 
 ```http
 POST /v1/repos/:slug/snapshots/:name/restore
+POST /v1/repos/:namespace/:slug/snapshots/:name/restore
 ```
 
 ```json

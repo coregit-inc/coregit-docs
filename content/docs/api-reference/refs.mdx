@@ -11,6 +11,7 @@ For higher-level branch management, see [Branches](/docs/api-reference/branches)
 
 ```http
 GET /v1/repos/:slug/refs
+GET /v1/repos/:namespace/:slug/refs
 ```
 
 Returns all refs (branches and tags) with their SHAs.
@@ -31,6 +32,7 @@ Returns all refs (branches and tags) with their SHAs.
 
 ```http
 GET /v1/repos/:slug/refs/heads/main
+GET /v1/repos/:namespace/:slug/refs/heads/main
 ```
 
 ```json
@@ -46,6 +48,7 @@ The path after `/refs/` maps directly to the ref name: `/refs/heads/main` → `r
 
 ```http
 PUT /v1/repos/:slug/refs/heads/main
+PUT /v1/repos/:namespace/:slug/refs/heads/main
 ```
 
 ```json
@@ -95,6 +98,7 @@ curl -X PUT https://api.coregit.dev/v1/repos/my-repo/refs/heads/main \
 
 ```http
 DELETE /v1/repos/:slug/refs/heads/feature-x
+DELETE /v1/repos/:namespace/:slug/refs/heads/feature-x
 ```
 
 **Response** `200`:

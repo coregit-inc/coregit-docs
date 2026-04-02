@@ -70,23 +70,55 @@ const git = createCoregitClient({
 
 The `fetch` option is useful for environments without a global `fetch` (older Node.js) or for testing with a mock.
 
+## Namespaces
+
+All repo-scoped methods accept either a slug string or a `{ namespace, slug }` object:
+
+```typescript
+// Without namespace (backwards compatible)
+await git.commits.list("my-repo");
+
+// With namespace
+await git.commits.list({ namespace: "alice", slug: "my-repo" });
+```
+
+This works across all clients: `repos`, `branches`, `commits`, `files`, `diff`, `compare`, `cherryPick`, `refs`, `snapshots`, `workspace`, and `sync`.
+
+Create a namespaced repo:
+
+```typescript
+const { data } = await git.repos.create({
+  slug: "my-repo",
+  namespace: "alice",
+});
+console.log(data.namespace); // "alice"
+```
+
+Filter repos by namespace:
+
+```typescript
+const { data } = await git.repos.list({ namespace: "alice" });
+```
+
 ## Repos
 
 ```typescript
 // Create
 const { data } = await git.repos.create({
   slug: "my-repo",
+  namespace: "alice", // optional
   description: "A test repo",
   visibility: "private",
   default_branch: "main",
 });
 
 // List
-const { data } = await git.repos.list({ limit: 20, offset: 0 });
+const { data } = await git.repos.list({ limit: 20, offset: 0, namespace: "alice" });
 console.log(data.repos); // Repo[]
 
 // Get
 const { data } = await git.repos.get("my-repo");
+// or: await git.repos.get({ namespace: "alice", slug: "my-repo" })
 console.log(data.is_empty); // boolean
 
 // Update
@@ -110,8 +142,11 @@ const { data: commit } = await git.commits.create("my-repo", {
   message: "feat: add authentication",
   author: { name: "AI Agent", email: "agent@example.com" },
   changes: [
-    // Create or update a file (provide content)
-    { path: "src/auth.ts", content: "export function login() { ... }" },
+    // Create a new file
+    { path: "src/auth.ts", content: "export function login() { ... }", action: "create" },
+
+    // Modify an existing file
+    { path: "src/config.ts", content: updatedConfig, action: "modify" },
 
     // Binary file (base64)
     { path: "logo.png", content: base64Data, encoding: "base64" },
@@ -344,6 +379,70 @@ console.log(data.sha); // restored commit SHA
 await git.snapshots.delete("my-repo", "before-refactor");
 ```
 
+## Workspace
+
+Execute shell commands against a repository. The filesystem is backed by git objects — optionally commit changes back.
+
+```typescript
+// Run a command
+const { data } = await git.workspace.exec("my-repo", {
+  command: "ls -la",
+  branch: "main",
+});
+console.log(data.stdout);
+console.log(data.exit_code); // 0
+
+// Run and commit the result
+const { data } = await git.workspace.exec("my-repo", {
+  command: "npm install express",
+  branch: "main",
+  commit: true,
+  commit_message: "chore: add express",
+  author: { name: "Agent", email: "agent@example.com" },
+});
+console.log(data.commit_sha); // new commit SHA
+console.log(data.changed_files); // ["package.json", "package-lock.json"]
+```
+
+## Sync
+
+Synchronize repositories from GitHub or GitLab.
+
+```typescript
+const { data } = await git.sync.trigger("my-repo", {
+  sync_id: "sync_abc123",
+  branch: "main",
+});
+
+if (data.synced) {
+  console.log(`Synced ${data.files_changed} files`);
+  console.log(`Deleted ${data.deleted} files`);
+  console.log(`Commit: ${data.commit_sha}`);
+} else {
+  console.log("Already up to date");
+}
+```
+
+## Tokens
+
+Create scoped, time-limited API tokens.
+
+```typescript
+// Create a read-only token (1 hour)
+const { data } = await git.tokens.create({
+  name: "agent-readonly",
+  scopes: { "repos:*": ["read"] },
+  expires_in: 3600,
+});
+console.log(data.token); // cgt_... — shown once, save it
+
+// List active tokens
+const { data: list } = await git.tokens.list();
+
+// Revoke
+await git.tokens.revoke(data.id);
+```
+
 ## Usage
 
 ```typescript
@@ -369,36 +468,36 @@ import { createCoregitClient } from "@strayl/coregit";
 
 const git = createCoregitClient({ apiKey: process.env.COREGIT_API_KEY! });
 
-// 1. Create repo
-await git.repos.create({ slug: "agent-output" });
+// 1. Create repo in a namespace
+await git.repos.create({ slug: "agent-output", namespace: "agents" });
+
+const repo = { namespace: "agents", slug: "agent-output" };
 
 // 2. Commit generated code
-await git.commits.create("agent-output", {
+await git.commits.create(repo, {
   branch: "main",
   message: "feat: implement auth",
   author: { name: "AI Agent", email: "agent@example.com" },
   changes: [
-    { path: "src/auth.ts", content: authCode },
-    { path: "src/middleware.ts", content: middlewareCode },
+    { path: "src/auth.ts", content: authCode, action: "create" },
+    { path: "src/middleware.ts", content: middlewareCode, action: "create" },
   ],
 });
 
 // 3. Snapshot before risky refactor
-await git.snapshots.create("agent-output", {
+await git.snapshots.create(repo, {
   name: "pre-refactor",
   branch: "main",
 });
 
-// 4. Attempt refactor
-const { error } = await git.commits.create("agent-output", {
+// 4. Run tests via workspace
+const { data: test } = await git.workspace.exec(repo, {
+  command: "npm test",
   branch: "main",
-  message: "refactor: simplify auth",
-  author: { name: "AI Agent", email: "agent@example.com" },
-  changes: [{ path: "src/auth.ts", content: refactoredCode }],
 });
 
-// 5. Restore if it broke
-if (error) {
-  await git.snapshots.restore("agent-output", "pre-refactor");
+if (test.exit_code !== 0) {
+  // 5. Restore if tests fail
+  await git.snapshots.restore(repo, "pre-refactor");
 }
 ```

@@ -1,0 +1,110 @@
+---
+title: Workspace
+description: Execute shell commands against a git repository with optional auto-commit.
+---
+
+## Execute Command
+
+Run a shell command in the context of a repository. The filesystem is backed by git objects — reads are lazy, writes are held in memory. Optionally commit changes back to git in a single atomic operation.
+
+```http
+POST /v1/repos/:slug/exec
+POST /v1/repos/:namespace/:slug/exec
+```
+
+**Permission:** Write access required.
+
+```json
+{
+  "command": "echo 'hello' > greeting.txt && cat greeting.txt",
+  "branch": "main",
+  "cwd": "/",
+  "env": { "NODE_ENV": "production" },
+  "commit": true,
+  "commit_message": "Add greeting file",
+  "author": { "name": "Agent", "email": "agent@example.com" }
+}
+```
+
+### Fields
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `command` | Yes | Shell command to execute (max 10,000 chars) |
+| `branch` | No | Target branch (default: repo's default branch) |
+| `cwd` | No | Working directory (default: `"/"`) |
+| `env` | No | Environment variables |
+| `commit` | No | Commit changed files after execution (default: `false`) |
+| `commit_message` | If `commit=true` | Commit message |
+| `author` | No | `{ name, email }` for the commit author |
+
+### Response `200`
+
+```json
+{
+  "stdout": "hello\n",
+  "stderr": "",
+  "exit_code": 0,
+  "changed_files": ["greeting.txt"],
+  "commit_sha": "a1b2c3...",
+  "execution_time_ms": 42
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `stdout` | Standard output |
+| `stderr` | Standard error |
+| `exit_code` | Process exit code |
+| `changed_files` | List of files created or modified |
+| `commit_sha` | Commit SHA (only when `commit=true`) |
+| `execution_time_ms` | Execution time in milliseconds |
+
+## Use Cases
+
+### Install dependencies and commit lockfile
+
+```json
+{
+  "command": "npm install express",
+  "branch": "main",
+  "commit": true,
+  "commit_message": "chore: add express dependency",
+  "author": { "name": "Agent", "email": "agent@example.com" }
+}
+```
+
+### Run a build without committing
+
+```json
+{
+  "command": "npm run build",
+  "branch": "main",
+  "commit": false
+}
+```
+
+### SDK Example
+
+```typescript
+const { data } = await git.workspace.exec("my-repo", {
+  command: "ls -la",
+  branch: "main",
+});
+
+console.log(data.stdout);
+console.log(data.exit_code); // 0
+```
+
+With namespaces:
+
+```typescript
+const { data } = await git.workspace.exec(
+  { namespace: "alice", slug: "my-repo" },
+  {
+    command: "npm test",
+    branch: "main",
+    commit: false,
+  },
+);
+```

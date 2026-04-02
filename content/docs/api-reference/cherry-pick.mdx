@@ -7,6 +7,7 @@ description: Replay a range of commits onto a new base, with conflict detection.
 
 ```http
 POST /v1/repos/:slug/cherry-pick
+POST /v1/repos/:namespace/:slug/cherry-pick
 ```
 
 Replays a range of commits onto a new base. This is the core primitive for building rebase workflows, stacked changes, and automated conflict resolution.

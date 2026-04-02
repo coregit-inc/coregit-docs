@@ -9,6 +9,7 @@ This is the core endpoint — create a commit with multiple file changes in a si
 
 ```http
 POST /v1/repos/:slug/commits
+POST /v1/repos/:namespace/:slug/commits
 ```
 
 ```json
@@ -20,12 +21,13 @@ POST /v1/repos/:slug/commits
   "changes": [
     {
       "path": "index.html",
-      "content": "<h1>Hello</h1>"
+      "content": "<h1>Hello</h1>",
+      "action": "create"
     },
     {
       "path": "config.json",
-      "content": "{\"version\": 1}",
-      "encoding": "utf-8"
+      "content": "{\"version\": 2}",
+      "action": "modify"
     },
     {
       "path": "old-file.txt",
@@ -37,19 +39,19 @@ POST /v1/repos/:slug/commits
 
 ### Changes
 
-Each entry in `changes` creates or updates a file by default. Set `action: "delete"` to remove a file.
+Each entry in `changes` describes a file operation.
 
 | Field | Required | Description |
 |-------|----------|-------------|
 | `path` | Yes | File path (no traversal) |
 | `content` | No | File content (required unless deleting) |
 | `encoding` | No | `utf-8` (default) or `base64` |
-| `action` | No | Set to `"delete"` to remove the file |
+| `action` | No | `"create"`, `"modify"`, or `"delete"` (default: `"modify"`) |
 
 ### Fields
 
 - `branch` — Target branch name
-- `message` — Commit message
+- `message` — Commit message (max 50 KB)
 - `author` — `{ name, email }` for the commit author
 - `parent_sha` — (optional) Expected head SHA for CAS conflict detection
 - `changes[].encoding` — `utf-8` (default) or `base64` for binary files
@@ -63,6 +65,7 @@ Each entry in `changes` creates or updates a file by default. Set `action: "dele
 
 ```http
 GET /v1/repos/:slug/commits?ref=main&limit=20
+GET /v1/repos/:namespace/:slug/commits?ref=main&limit=20
 ```
 
 - `ref` (or `branch`) — Branch name, tag, or SHA (default: repo's default branch)
@@ -91,6 +94,7 @@ GET /v1/repos/:slug/commits?ref=main&limit=20
 
 ```http
 GET /v1/repos/:slug/commits/:sha
+GET /v1/repos/:namespace/:slug/commits/:sha
 ```
 
 **Response** `200`:

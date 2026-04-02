@@ -1,0 +1,102 @@
+---
+title: Sync
+description: Synchronize repositories from GitHub and GitLab into CoreGit.
+---
+
+## Trigger Sync
+
+Pull the latest state from an external Git provider (GitHub or GitLab) into a CoreGit repository. Uses archive-based download — no direct git access needed, only a user access token.
+
+```http
+POST /v1/repos/:slug/sync
+POST /v1/repos/:namespace/:slug/sync
+```
+
+**Permission:** Master API key only.
+
+```json
+{
+  "sync_id": "sync_abc123",
+  "branch": "main"
+}
+```
+
+### Fields
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `sync_id` | Yes | Sync configuration ID (created via dashboard) |
+| `branch` | No | Target branch (default: sync config's default branch) |
+
+### Response `200`
+
+```json
+{
+  "synced": true,
+  "remote_sha": "7f3b...",
+  "commit_sha": "a1c2...",
+  "files_changed": 42,
+  "deleted": 3
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `synced` | `true` if changes were applied, `false` if already up to date |
+| `remote_sha` | Latest commit SHA on the remote |
+| `commit_sha` | CoreGit commit SHA created by this sync (null if no changes) |
+| `files_changed` | Number of files created or updated |
+| `deleted` | Number of files deleted |
+
+## How Sync Works
+
+1. CoreGit downloads the repository archive from the provider (GitHub tarball or GitLab archive)
+2. Compares contents against the last synced state
+3. Creates a single commit with all changes (additions, modifications, deletions)
+4. Updates the sync configuration with the new remote SHA
+
+### Supported Providers
+
+| Provider | Remote Format | Example |
+|----------|--------------|---------|
+| GitHub | `owner/repo` | `strayl/coregit` |
+| GitLab | `group/project` | `mygroup/myproject` |
+
+### Limits
+
+- Max archive size: **50 MB**
+- Max file size: **5 MB** per file
+- Max files: **5,000** per sync
+
+## Setup
+
+Sync configurations are managed through the CoreGit dashboard:
+
+1. Connect your GitHub or GitLab account (OAuth)
+2. Create a sync configuration for a repository, specifying the remote and branch
+3. Trigger syncs via the API or enable auto-sync
+
+## SDK Example
+
+```typescript
+const { data } = await git.sync.trigger("my-repo", {
+  sync_id: "sync_abc123",
+  branch: "main",
+});
+
+if (data.synced) {
+  console.log(`Synced ${data.files_changed} files`);
+  console.log(`Commit: ${data.commit_sha}`);
+} else {
+  console.log("Already up to date");
+}
+```
+
+With namespaces:
+
+```typescript
+const { data } = await git.sync.trigger(
+  { namespace: "alice", slug: "my-repo" },
+  { sync_id: "sync_abc123" },
+);
+```

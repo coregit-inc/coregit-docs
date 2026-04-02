@@ -7,6 +7,7 @@ description: Create, list, and manage branches through the API.
 
 ```http
 POST /v1/repos/:slug/branches
+POST /v1/repos/:namespace/:slug/branches
 ```
 
 ```json
@@ -26,6 +27,7 @@ If neither `from` nor `from_sha` is provided, branches from the default branch.
 
 ```http
 GET /v1/repos/:slug/branches
+GET /v1/repos/:namespace/:slug/branches
 ```
 
 **Response** `200`:
@@ -44,6 +46,7 @@ GET /v1/repos/:slug/branches
 
 ```http
 GET /v1/repos/:slug/branches/:name
+GET /v1/repos/:namespace/:slug/branches/:name
 ```
 
 Returns the branch name and the SHA of its head commit.
@@ -52,6 +55,7 @@ Returns the branch name and the SHA of its head commit.
 
 ```http
 DELETE /v1/repos/:slug/branches/:name
+DELETE /v1/repos/:namespace/:slug/branches/:name
 ```
 
 You cannot delete the default branch.
@@ -60,6 +64,7 @@ You cannot delete the default branch.
 
 ```http
 POST /v1/repos/:slug/branches/:name/merge
+POST /v1/repos/:namespace/:slug/branches/:name/merge
 ```
 
 The `:name` in the URL is the **source branch**. The request body specifies the **target** and **strategy**:

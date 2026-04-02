@@ -7,6 +7,7 @@ description: Browse directory trees and read file contents via the API.
 
 ```http
 GET /v1/repos/:slug/tree/:ref/*path
+GET /v1/repos/:namespace/:slug/tree/:ref/*path
 ```
 
 The `:ref` can be a branch name, tag, or commit SHA.
@@ -31,6 +32,7 @@ Entry types are `"folder"` or `"file"`.
 
 ```http
 GET /v1/repos/:slug/blob/:ref/*path
+GET /v1/repos/:namespace/:slug/blob/:ref/*path
 ```
 
 Returns the file content. Binary files are returned as base64. Max file size: **50 MB**.
@@ -53,6 +55,7 @@ Supports `ETag` / `If-None-Match` for caching.
 
 ```http
 GET /v1/repos/:slug/refs
+GET /v1/repos/:namespace/:slug/refs
 ```
 
 Returns all branches and tags with their head SHAs:

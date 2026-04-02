@@ -1,0 +1,159 @@
+---
+title: Tokens
+description: Create and manage scoped API tokens with fine-grained permissions.
+---
+
+Scoped tokens provide limited, time-bounded access to specific repositories. Use them to grant agents or integrations only the permissions they need.
+
+## Create Token
+
+```http
+POST /v1/tokens
+```
+
+**Permission:** Master API key only.
+
+```json
+{
+  "name": "ci-deploy-token",
+  "scopes": {
+    "repos:my-app": ["read", "write"],
+    "repos:shared-lib": ["read"]
+  },
+  "expires_in": 86400
+}
+```
+
+### Fields
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | Yes | Token name (1–100 chars) |
+| `scopes` | Yes | Permission map (see below) |
+| `expires_in` | Yes | TTL in seconds (3,600–2,592,000 i.e. 1 hour to 30 days) |
+
+### Scope Format
+
+Scopes map repository patterns to permission arrays:
+
+```json
+{
+  "repos:*": ["read"],
+  "repos:my-app": ["read", "write"],
+  "repos:alice/my-app": ["read", "write"]
+}
+```
+
+| Pattern | Meaning |
+|---------|---------|
+| `repos:*` | All repositories |
+| `repos:my-app` | Single repo (no namespace) |
+| `repos:alice/my-app` | Single repo (namespaced) |
+
+Permissions: `read` (clone, browse, diff) and `write` (push, commit, merge, exec).
+
+### Response `201`
+
+```json
+{
+  "id": "tok_abc123...",
+  "token": "cgt_a1b2c3d4e5f6...",
+  "name": "ci-deploy-token",
+  "key_prefix": "cgt_a1b2c3d4",
+  "scopes": {
+    "repos:my-app": ["read", "write"],
+    "repos:shared-lib": ["read"]
+  },
+  "expires_at": "2025-01-02T00:00:00Z",
+  "created_at": "2025-01-01T00:00:00Z"
+}
+```
+
+The `token` field is shown **only once** at creation time. Store it securely.
+
+## List Tokens
+
+```http
+GET /v1/tokens
+```
+
+**Permission:** Master API key only.
+
+Returns all active (non-revoked, non-expired) tokens.
+
+**Response** `200`:
+
+```json
+{
+  "tokens": [
+    {
+      "id": "tok_abc123...",
+      "name": "ci-deploy-token",
+      "key_prefix": "cgt_a1b2c3d4",
+      "scopes": { "repos:my-app": ["read", "write"] },
+      "expires_at": "2025-01-02T00:00:00Z",
+      "last_used": "2025-01-01T12:00:00Z",
+      "created_at": "2025-01-01T00:00:00Z"
+    }
+  ]
+}
+```
+
+## Revoke Token
+
+```http
+DELETE /v1/tokens/:id
+```
+
+**Permission:** Master API key only.
+
+**Response** `200`:
+
+```json
+{
+  "id": "tok_abc123...",
+  "revoked": true
+}
+```
+
+Revoked tokens are immediately invalidated. Any in-flight requests using the token will fail.
+
+## Using Scoped Tokens
+
+Scoped tokens authenticate the same way as master API keys:
+
+```bash
+# HTTP header
+curl -H "x-api-key: cgt_a1b2c3..." https://api.coregit.dev/v1/repos/my-app/commits
+
+# Git clone (Basic auth)
+git clone https://org:cgt_a1b2c3...@api.coregit.dev/org/my-app.git
+```
+
+Requests outside the token's scope return `403 Forbidden`.
+
+## Limits
+
+- Max **1,000** active tokens per organization
+- Tokens expire automatically after the specified TTL
+- Expired tokens are cleaned up and no longer listed
+
+## SDK Example
+
+```typescript
+// Create a read-only token for an agent
+const { data } = await git.tokens.create({
+  name: "agent-readonly",
+  scopes: { "repos:*": ["read"] },
+  expires_in: 3600, // 1 hour
+});
+
+console.log(data.token); // cgt_... — save this!
+
+// List active tokens
+const { data: list } = await git.tokens.list();
+console.log(list.tokens.length);
+
+// Revoke when done
+await git.tokens.revoke(data.id);
+```
