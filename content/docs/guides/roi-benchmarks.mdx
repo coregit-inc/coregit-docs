@@ -50,7 +50,7 @@ Even the mid workload (15k 10-file commits/day) combines ~$490 per month of sand
 | API commit (3 files) | ~300 ms | Blob hashing + tree build + CAS ref update |
 | Read file | ~100 ms | 1 R2 read + decompress |
 | List repos | ~50 ms | Single DB query |
-| Clone (<100 MB) | ~500 ms | In-memory packfile generation |
+| Clone (under 100 MB) | ~500 ms | In-memory packfile generation |
 | Diff (100 files) | ~800 ms | Full tree walks + blob reads |
 
 ### Microbench results (`npm run test:bench`, Apr 2, 2026)

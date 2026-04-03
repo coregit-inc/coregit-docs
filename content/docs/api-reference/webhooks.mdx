@@ -1,0 +1,181 @@
+---
+title: Webhooks
+description: Receive real-time notifications when events occur in your repositories.
+---
+
+Webhooks send HTTP POST requests to your URL when events occur. Each delivery includes an HMAC-SHA256 signature for verification.
+
+## Supported Events
+
+| Event | Trigger |
+|-------|---------|
+| `push` | New commits pushed to a branch |
+| `repo.created` | Repository created |
+| `repo.deleted` | Repository deleted |
+| `branch.created` | Branch created |
+| `branch.deleted` | Branch deleted |
+| `*` | All events |
+
+## Create Webhook
+
+```http
+POST /v1/webhooks
+```
+
+**Permission:** Master API key only.
+
+```json
+{
+  "url": "https://example.com/webhooks/coregit",
+  "events": ["push", "branch.created"]
+}
+```
+
+- `url` — Required. Must use HTTPS
+- `events` — Required. Non-empty array of event types
+
+**Response** `201`:
+
+```json
+{
+  "id": "abc123...",
+  "url": "https://example.com/webhooks/coregit",
+  "events": ["push", "branch.created"],
+  "secret": "whsec_...",
+  "active": true
+}
+```
+
+The `secret` is shown **only at creation**. Store it securely to verify webhook signatures.
+
+## List Webhooks
+
+```http
+GET /v1/webhooks
+```
+
+**Permission:** Master API key only.
+
+**Response** `200`:
+
+```json
+{
+  "webhooks": [
+    {
+      "id": "abc123...",
+      "url": "https://example.com/webhooks/coregit",
+      "events": ["push"],
+      "active": true,
+      "created_at": "2025-01-01T00:00:00Z"
+    }
+  ]
+}
+```
+
+## Get Webhook
+
+```http
+GET /v1/webhooks/:id
+```
+
+**Permission:** Master API key only.
+
+## Update Webhook
+
+```http
+PATCH /v1/webhooks/:id
+```
+
+**Permission:** Master API key only.
+
+```json
+{
+  "url": "https://new-url.example.com/hook",
+  "events": ["*"],
+  "active": false
+}
+```
+
+All fields are optional.
+
+## Delete Webhook
+
+```http
+DELETE /v1/webhooks/:id
+```
+
+**Permission:** Master API key only.
+
+**Response** `200`:
+
+```json
+{
+  "deleted": true
+}
+```
+
+## Delivery Format
+
+When an event fires, CoreGit sends a POST request to your URL:
+
+```json
+{
+  "event": "push",
+  "timestamp": "2025-06-15T12:00:00.000Z",
+  "org_id": "org_abc123",
+  "data": {
+    "repo": "my-repo",
+    "branch": "main",
+    "commit_sha": "7f3b..."
+  }
+}
+```
+
+### Headers
+
+| Header | Description |
+|--------|-------------|
+| `X-CoreGit-Event` | Event type (e.g., `push`) |
+| `X-CoreGit-Signature` | HMAC-SHA256 signature: `sha256=...` |
+| `X-CoreGit-Webhook-Id` | Webhook ID |
+| `Content-Type` | `application/json` |
+| `User-Agent` | `CoreGit-Webhook/1.0` |
+
+### Verifying Signatures
+
+Compute `HMAC-SHA256(secret, raw_body)` and compare with the `X-CoreGit-Signature` header:
+
+```typescript
+import { createHmac } from "crypto";
+
+function verifySignature(secret: string, body: string, signature: string): boolean {
+  const expected = "sha256=" + createHmac("sha256", secret).update(body).digest("hex");
+  return expected === signature;
+}
+```
+
+### Delivery Behavior
+
+- **Timeout:** 10 seconds per delivery
+- **Retries:** None (fire-and-forget)
+- **Concurrency:** Multiple webhooks are delivered in parallel
+
+## SDK Example
+
+```typescript
+// Create webhook
+const { data } = await git.webhooks.create({
+  url: "https://example.com/hook",
+  events: ["push", "repo.created"],
+});
+console.log(data.secret); // whsec_... — save this!
+
+// List
+const { data: list } = await git.webhooks.list();
+
+// Update (disable)
+await git.webhooks.update(data.id, { active: false });
+
+// Delete
+await git.webhooks.delete(data.id);
+```

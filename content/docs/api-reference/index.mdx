@@ -17,15 +17,40 @@ Include your API key in every request:
 -H "x-api-key: cgk_live_YOUR_KEY"
 ```
 
+## Request ID
+
+Every response includes an `X-Request-Id` header for debugging and support:
+
+```
+X-Request-Id: a1b2c3d4
+```
+
 ## Response Format
 
-All responses return JSON. Successful responses use `2xx` status codes. Errors follow this shape:
+All responses return JSON. Successful responses use `2xx` status codes. Errors include a human-readable `error` and a machine-readable `code`:
 
 ```json
 {
-  "error": "Repository not found"
+  "error": "Repository not found",
+  "code": "NOT_FOUND"
 }
 ```
+
+### Error Codes
+
+| Code | Meaning |
+|------|---------|
+| `UNAUTHORIZED` | Missing or invalid API key |
+| `FORBIDDEN` | Insufficient permissions |
+| `NOT_FOUND` | Resource not found |
+| `VALIDATION_ERROR` | Invalid request body or parameters |
+| `CONFLICT` | Concurrent update or merge conflict |
+| `RATE_LIMITED` | Too many requests |
+| `QUOTA_EXCEEDED` | Free tier limit exceeded |
+| `PAYLOAD_TOO_LARGE` | Request body too large |
+| `UNPROCESSABLE` | Valid request but cannot be processed |
+| `TIMEOUT` | Operation timed out |
+| `INTERNAL_ERROR` | Server error |
 
 ## Common Status Codes
 
@@ -81,5 +106,21 @@ The `namespace` field appears in all repository responses (`null` when not set).
 
 ## Rate Limits
 
-- **Free tier**: 10,000 API calls / month
+Per-key sliding window rate limiting applies to all authenticated requests:
+
+- **600 requests / minute** (burst)
+- **15,000 requests / hour** (sustained)
+
+Rate limit headers are included on every response:
+
+| Header | Description |
+|--------|-------------|
+| `X-RateLimit-Limit` | Max requests per minute |
+| `X-RateLimit-Remaining` | Remaining requests in current window |
+| `X-RateLimit-Reset` | Unix timestamp when the window resets |
+| `Retry-After` | Seconds to wait (only on `429`) |
+
+### Monthly Quotas
+
+- **Free tier**: 10,000 API calls / month, 5 repos, 1 GB storage
 - **Usage tier**: Unlimited (metered billing)

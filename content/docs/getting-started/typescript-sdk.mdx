@@ -381,10 +381,10 @@ await git.snapshots.delete("my-repo", "before-refactor");
 
 ## Workspace
 
-Execute shell commands against a repository. The filesystem is backed by git objects — optionally commit changes back.
+Execute shell commands against a repository. The filesystem is backed by git objects — optionally commit changes back. Use `ref` to execute on any commit in history.
 
 ```typescript
-// Run a command
+// Run a command on branch HEAD
 const { data } = await git.workspace.exec("my-repo", {
   command: "ls -la",
   branch: "main",
@@ -392,12 +392,19 @@ const { data } = await git.workspace.exec("my-repo", {
 console.log(data.stdout);
 console.log(data.exit_code); // 0
 
-// Run and commit the result
+// Execute on a specific commit in history
 const { data } = await git.workspace.exec("my-repo", {
-  command: "npm install express",
-  branch: "main",
+  command: "cat package.json",
+  ref: "a1b2c3d4...", // any commit SHA, branch, or tag
+});
+
+// Execute on old commit and commit result to a branch
+const { data } = await git.workspace.exec("my-repo", {
+  command: "npm run fix-legacy",
+  ref: "v1.0.0",
+  branch: "hotfix",
   commit: true,
-  commit_message: "chore: add express",
+  commit_message: "fix: backport patch",
   author: { name: "Agent", email: "agent@example.com" },
 });
 console.log(data.commit_sha); // new commit SHA
@@ -441,6 +448,28 @@ const { data: list } = await git.tokens.list();
 
 // Revoke
 await git.tokens.revoke(data.id);
+```
+
+## Webhooks
+
+Receive real-time notifications when events occur.
+
+```typescript
+// Create webhook
+const { data } = await git.webhooks.create({
+  url: "https://example.com/hook",
+  events: ["push", "branch.created"],
+});
+console.log(data.secret); // whsec_... — save this!
+
+// List
+const { data: list } = await git.webhooks.list();
+
+// Update (disable)
+await git.webhooks.update(data.id, { active: false });
+
+// Delete
+await git.webhooks.delete(data.id);
 ```
 
 ## Usage
