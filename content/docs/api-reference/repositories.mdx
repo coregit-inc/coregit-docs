@@ -5,6 +5,8 @@ description: Create, list, update, and delete Git repositories via the API.
 
 ## Create Repository
 
+**Permission:** Master API key only.
+
 ```http
 POST /v1/repos
 ```
@@ -51,6 +53,7 @@ GET /v1/repos?limit=50&offset=0&namespace=alice
 
 - `limit` — Max results (default: 50, max: 100)
 - `offset` — Skip items (default: 0)
+- `cursor` — Keyset pagination cursor (from `next_cursor` in previous response)
 - `namespace` — Filter by namespace (optional)
 
 **Response** `200`:
@@ -70,7 +73,8 @@ GET /v1/repos?limit=50&offset=0&namespace=alice
     }
   ],
   "limit": 50,
-  "offset": 0
+  "offset": 0,
+  "next_cursor": "eyJ1cGRhdGVkX2F0Ijoi..."
 }
 ```
 
@@ -84,6 +88,8 @@ GET /v1/repos/:namespace/:slug
 Returns the full repository object including `is_empty`, `git_url`, and `api_url`.
 
 ## Update Repository
+
+**Permission:** Master API key only.
 
 ```http
 PATCH /v1/repos/:slug
@@ -101,6 +107,8 @@ PATCH /v1/repos/:namespace/:slug
 All fields are optional.
 
 ## Delete Repository
+
+**Permission:** Master API key only.
 
 ```http
 DELETE /v1/repos/:slug

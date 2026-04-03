@@ -31,6 +31,7 @@ GET /v1/usage/details?limit=100&offset=0
 
 - `limit` — Max results (default: 100, max: 500)
 - `offset` — Skip items (default: 0)
+- `cursor` — Keyset pagination cursor
 
 **Response** `200`:
 
@@ -46,7 +47,8 @@ GET /v1/usage/details?limit=100&offset=0
     }
   ],
   "limit": 100,
-  "offset": 0
+  "offset": 0,
+  "next_cursor": null
 }
 ```
 

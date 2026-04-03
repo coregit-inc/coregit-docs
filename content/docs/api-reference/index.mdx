@@ -67,14 +67,21 @@ All responses return JSON. Successful responses use `2xx` status codes. Errors i
 
 ## Pagination
 
-List endpoints accept `limit` and `offset` query parameters:
+List endpoints support both offset and cursor-based pagination:
 
 ```bash
+# Offset pagination
 GET /v1/repos?limit=20&offset=0
+
+# Cursor pagination (preferred for large datasets)
+GET /v1/repos?limit=20&cursor=eyJ1cGRhdGVkX2F0Ijoi...
 ```
 
 - `limit` — Number of items to return (varies by endpoint, typically max 100)
 - `offset` — Number of items to skip (default: 0)
+- `cursor` — Opaque token from `next_cursor` in the previous response
+
+When `next_cursor` is `null`, there are no more results. Cursor pagination is more efficient than offset for large result sets.
 
 ## Namespaces
 

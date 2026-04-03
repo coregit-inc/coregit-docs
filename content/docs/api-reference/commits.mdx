@@ -70,6 +70,7 @@ GET /v1/repos/:namespace/:slug/commits?ref=main&limit=20
 
 - `ref` (or `branch`) — Branch name, tag, or SHA (default: repo's default branch)
 - `limit` — Max results (default: 20, max: 100)
+- `cursor` — Commit SHA to resume after (for keyset pagination)
 
 **Response** `200`:
 
@@ -86,7 +87,8 @@ GET /v1/repos/:namespace/:slug/commits?ref=main&limit=20
     }
   ],
   "ref": "main",
-  "has_more": false
+  "has_more": false,
+  "next_cursor": null
 }
 ```
 

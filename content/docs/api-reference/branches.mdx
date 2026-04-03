@@ -30,6 +30,9 @@ GET /v1/repos/:slug/branches
 GET /v1/repos/:namespace/:slug/branches
 ```
 
+- `limit` — Max results (default: 100, max: 500)
+- `cursor` — Keyset pagination cursor
+
 **Response** `200`:
 
 ```json
@@ -38,7 +41,9 @@ GET /v1/repos/:namespace/:slug/branches
     { "name": "main", "sha": "7f3b..." },
     { "name": "feature-x", "sha": "a1c2..." }
   ],
-  "default_branch": "main"
+  "default_branch": "main",
+  "total": 2,
+  "next_cursor": null
 }
 ```
 
