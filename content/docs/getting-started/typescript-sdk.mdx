@@ -268,6 +268,15 @@ console.log(data.total_files_changed); // 3
 for (const file of data.files) {
   console.log(file.path, file.status); // "src/auth.ts" "modified"
 }
+
+// With unified diff patches
+const { data } = await git.diff.compare("my-repo", "main", "feature-x", {
+  patch: true,
+  context: 5,
+});
+for (const file of data.files) {
+  if (file.patch) console.log(file.patch); // unified diff
+}
 ```
 
 ## Compare
@@ -409,6 +418,57 @@ const { data } = await git.workspace.exec("my-repo", {
 });
 console.log(data.commit_sha); // new commit SHA
 console.log(data.changed_files); // ["package.json", "package-lock.json"]
+```
+
+### Multi-Repo Execution
+
+Execute commands across multiple repos at once. Each repo is mounted at `/{slug}/`.
+
+```typescript
+const { data } = await git.workspace.multiExec({
+  repos: [
+    { slug: "frontend", branch: "main" },
+    { slug: "backend", branch: "main" },
+  ],
+  command: "grep -r 'API_VERSION' .",
+});
+console.log(data.stdout);
+console.log(data.repos_mounted); // ["frontend", "backend"]
+
+// Modify across repos and commit
+const { data } = await git.workspace.multiExec({
+  repos: [{ slug: "frontend" }, { slug: "backend" }],
+  command: "sed -i 's/v1/v2/g' */src/config.ts",
+  commit: true,
+  commit_message: "chore: bump API version",
+  author: { name: "Agent", email: "agent@example.com" },
+});
+console.log(data.commits); // { frontend: "a1b2...", backend: "d4e5..." }
+```
+
+## Search
+
+Full-text code search across repositories.
+
+```typescript
+// Simple search
+const { data } = await git.search.query({
+  q: "TODO",
+  repos: ["my-app", "shared-lib"],
+});
+console.log(`Found ${data.total} matches in ${data.repos_searched} repos`);
+
+for (const match of data.matches) {
+  console.log(`${match.repo_slug}:${match.path}:${match.line} — ${match.content}`);
+}
+
+// Regex search with path filter
+const { data } = await git.search.query({
+  q: "function\\s+\\w+Async",
+  regex: true,
+  path_pattern: "src/**/*.ts",
+  max_results: 200,
+});
 ```
 
 ## Sync

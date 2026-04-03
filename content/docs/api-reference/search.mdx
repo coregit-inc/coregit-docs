@@ -1,0 +1,116 @@
+---
+title: Search
+description: Full-text code search across repositories.
+---
+
+Search across all (or selected) repositories in your organization. Supports substring and regex matching with file path filtering.
+
+## Search Code
+
+```http
+POST /v1/search
+```
+
+**Permission:** Read access required.
+
+```json
+{
+  "q": "console.log",
+  "repos": ["my-app", "shared-lib"],
+  "regex": false,
+  "case_sensitive": false,
+  "context_lines": 2,
+  "max_results": 100,
+  "branch": "main",
+  "path_pattern": "src/*.ts"
+}
+```
+
+### Fields
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `q` | Yes | Search query (substring or regex pattern) |
+| `repos` | No | Filter to specific repo slugs (default: all accessible repos) |
+| `regex` | No | Treat `q` as a regular expression (default: `false`) |
+| `case_sensitive` | No | Case-sensitive matching (default: `false`) |
+| `context_lines` | No | Lines of context around each match (default: 2, max: 10) |
+| `max_results` | No | Max matches to return (default: 100, max: 500) |
+| `branch` | No | Branch to search in each repo (default: repo's default branch) |
+| `path_pattern` | No | Glob-like filter on file paths (e.g., `"src/*.ts"`) |
+
+### Response `200`
+
+```json
+{
+  "matches": [
+    {
+      "repo_slug": "my-app",
+      "repo_namespace": null,
+      "path": "src/index.ts",
+      "line": 42,
+      "content": "  console.log(\"server started\");",
+      "context_before": [
+        "  const port = 3000;",
+        "  app.listen(port, () => {"
+      ],
+      "context_after": [
+        "  });",
+        "}"
+      ]
+    }
+  ],
+  "total": 1,
+  "repos_searched": 2,
+  "truncated": false
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `matches` | Array of search results with file location and context |
+| `total` | Number of matches returned |
+| `repos_searched` | Number of repositories searched |
+| `truncated` | Whether results were cut short (deadline or max_results reached) |
+
+### Limits
+
+- Max **50 repos** per search
+- Max **500 results** per query
+- Max file size: **512 KB** (larger files are skipped)
+- **20-second** execution deadline
+
+### Regex Search
+
+```json
+{
+  "q": "function\\s+\\w+Async",
+  "regex": true,
+  "path_pattern": "*.ts"
+}
+```
+
+## SDK Example
+
+```typescript
+// Simple search
+const { data } = await git.search.query({
+  q: "TODO",
+  repos: ["my-app"],
+});
+
+for (const match of data.matches) {
+  console.log(`${match.repo_slug}:${match.path}:${match.line}`);
+  console.log(`  ${match.content}`);
+}
+
+// Regex search across all repos
+const { data } = await git.search.query({
+  q: "import.*from ['\"]@internal",
+  regex: true,
+  path_pattern: "src/**/*.ts",
+  max_results: 200,
+});
+
+console.log(`Found ${data.total} matches in ${data.repos_searched} repos`);
+```

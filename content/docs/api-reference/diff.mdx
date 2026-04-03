@@ -10,6 +10,15 @@ GET /v1/repos/:slug/diff?base=main&head=feature-x
 GET /v1/repos/:namespace/:slug/diff?base=main&head=feature-x
 ```
 
+### Query Parameters
+
+| Param | Required | Description |
+|-------|----------|-------------|
+| `base` | Yes | Branch name, tag, or commit SHA |
+| `head` | Yes | Branch name, tag, or commit SHA |
+| `patch` | No | Include unified diff patches (default: `false`) |
+| `context` | No | Context lines for patches (default: 3, max: 20) |
+
 **Response** `200`:
 
 ```json
@@ -45,3 +54,41 @@ GET /v1/repos/:namespace/:slug/diff?base=main&head=feature-x
 | `removed` | Deleted in head |
 
 Each file entry includes `old_sha` and `new_sha` (the blob SHAs before and after). `null` when the file didn't exist on that side.
+
+### Unified Diff Patches
+
+Add `?patch=true` to include git-compatible unified diff for each file:
+
+```http
+GET /v1/repos/:slug/diff?base=main&head=feature-x&patch=true&context=5
+```
+
+Each file in the response will include a `patch` field:
+
+```json
+{
+  "path": "src/auth.ts",
+  "status": "modified",
+  "old_sha": "d4e5...",
+  "new_sha": "f6a7...",
+  "patch": "--- a/src/auth.ts\n+++ b/src/auth.ts\n@@ -10,3 +10,4 @@\n function login() {\n+  validate();\n   return token;\n }"
+}
+```
+
+### SDK Example
+
+```typescript
+// Without patches
+const { data } = await git.diff.compare("my-repo", "main", "feature-x");
+
+// With unified diff patches
+const { data } = await git.diff.compare("my-repo", "main", "feature-x", {
+  patch: true,
+  context: 5,
+});
+
+for (const file of data.files) {
+  console.log(file.path, file.status);
+  if (file.patch) console.log(file.patch);
+}
+```

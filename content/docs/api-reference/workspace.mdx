@@ -150,3 +150,100 @@ const { data } = await git.workspace.exec(
   },
 );
 ```
+
+---
+
+## Multi-Repo Execution
+
+Execute a command across multiple repositories mounted at virtual paths (`/{slug}/`).
+
+```http
+POST /v1/workspace/exec
+```
+
+**Permission:** Read or write access to all specified repos.
+
+```json
+{
+  "repos": [
+    { "slug": "frontend", "branch": "main" },
+    { "slug": "backend", "branch": "main" },
+    { "slug": "shared-lib", "namespace": "libs" }
+  ],
+  "command": "grep -r 'API_VERSION' .",
+  "commit": false
+}
+```
+
+### Fields
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `repos` | Yes | Array of repos to mount (max 10) |
+| `repos[].slug` | Yes | Repository slug |
+| `repos[].branch` | No | Branch name (default: repo's default branch) |
+| `repos[].namespace` | No | Namespace for scoped repos |
+| `command` | Yes | Shell command to execute (max 10,000 chars) |
+| `cwd` | No | Working directory |
+| `env` | No | Environment variables |
+| `commit` | No | Commit changes per repo (default: `false`) |
+| `commit_message` | If `commit=true` | Commit message |
+| `author` | No | `{ name, email }` for commit author |
+
+Each repo is mounted at `/{slug}/` in the virtual filesystem. The command runs across all of them.
+
+### Response `200`
+
+```json
+{
+  "stdout": "frontend/src/config.ts:  API_VERSION: '2'\nbackend/src/config.ts:  API_VERSION: '2'\n",
+  "stderr": "",
+  "exit_code": 0,
+  "changed_files": {},
+  "commits": {},
+  "repos_mounted": ["frontend", "backend", "shared-lib"],
+  "execution_time_ms": 1200
+}
+```
+
+When `commit=true`, changes are committed independently per repo:
+
+```json
+{
+  "changed_files": {
+    "frontend": [{ "path": "src/version.ts", "action": "modify" }],
+    "backend": [{ "path": "src/version.ts", "action": "modify" }]
+  },
+  "commits": {
+    "frontend": "a1b2c3...",
+    "backend": "d4e5f6..."
+  }
+}
+```
+
+### SDK Example
+
+```typescript
+// Search across repos
+const { data } = await git.workspace.multiExec({
+  repos: [
+    { slug: "frontend" },
+    { slug: "backend" },
+  ],
+  command: "grep -r 'deprecated' .",
+});
+console.log(data.stdout);
+
+// Modify files across repos and commit
+const { data } = await git.workspace.multiExec({
+  repos: [
+    { slug: "frontend", branch: "main" },
+    { slug: "backend", branch: "main" },
+  ],
+  command: "sed -i 's/v1/v2/g' */src/config.ts",
+  commit: true,
+  commit_message: "chore: bump API version to v2",
+  author: { name: "Agent", email: "agent@example.com" },
+});
+console.log(data.commits); // { frontend: "a1b2...", backend: "d4e5..." }
+```
