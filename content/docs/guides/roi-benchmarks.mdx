@@ -23,14 +23,14 @@ The API can commit N files in a single request, while GitHub's REST API still ne
 
 ### Seatless usage pricing
 
-Usage tier pricing starts at $0.50 per private repository per month with unlimited API calls, storage, and git transfer above the free tier limits. Because there are no seat charges, automation-heavy orgs with dozens of service accounts pay only for actual repo footprint.
+Usage tier is pay-as-you-go with no seat charges: $0.50/1K API calls, $0.10/GB storage/mo, $0.10/GB transfer. Unlimited repos. Because there are no per-user fees, automation-heavy orgs with dozens of service accounts pay only for actual git operations.
 
-| Org footprint | Legacy seat model* | Coregit usage tier | Monthly savings |
+| Org footprint | Legacy seat model* | Coregit usage tier** | Monthly savings |
 | --- | --- | --- | --- |
-| 40 repos powering 20 humans + 20 agent identities | 40 seats * $4 = $160 | 40 repos * $0.50 = $20 | $140 |
-| 100 experiment repos managed by 8 engineers + 52 bots | 60 seats * $4 = $240 | 100 repos * $0.50 = $50 | $190 |
+| 40 repos, 20 humans + 20 agents, ~100 API calls + 50 MB storage + 100 MB transfer per repo | 40 seats x $4 = $160 | ~$65 | ~$95 |
+| 100 repos, 8 engineers + 52 bots, same per-repo usage | 60 seats x $4 = $240 | ~$65 | ~$175 |
 
-<small>*GitHub Team public price of $4/seat/month. Actual competitor pricing may vary.</small>
+<small>*GitHub Team public price of $4/seat/month. Actual competitor pricing may vary. **Coregit estimate: ~100 API calls, 50 MB storage, 100 MB transfer per repo/month.</small>
 
 ### Zero egress and serverless infra
 
@@ -38,7 +38,7 @@ Coregit runs entirely on Cloudflare Workers and R2, so outbound bandwidth from t
 
 ### Combined ROI
 
-Even the mid workload (15k 10-file commits/day) combines ~$490 per month of sandbox time savings with ~$190 per month of seat/license savings, yielding ~$680 every month before counting avoided egress bills or the engineering time saved by snapshots and restore points.
+Even the mid workload (15k 10-file commits/day) yields ~$490/mo in sandbox time savings alone. Add seat savings and avoided egress — **~$540+/month** before counting engineering time saved by snapshots and restore points. The real unlock is throughput: GitHub's 500 writes/hour cap blocks scaling entirely, regardless of cost.
 
 ## Benchmarks
 
@@ -68,4 +68,4 @@ Even the mid workload (15k 10-file commits/day) combines ~$490 per month of sand
 
 - The end-to-end table provides the commit, read, and clone baselines to feed into planning models for AI agent throughput.
 - The microbench suite highlights where the current Worker spends CPU time (hex encoding is solved, decompression still needs iteration) so infra owners can focus on the largest multipliers.
-- Pair the request-count savings with repo-level pricing when sizing customer pitches or internal ROI reviews.
+- Pair the request-count savings with usage pricing when sizing customer pitches or internal ROI reviews.
