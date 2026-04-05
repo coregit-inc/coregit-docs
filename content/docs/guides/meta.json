@@ -1,5 +1,5 @@
 {
   "title": "Guides",
-  "pages": ["ai-agents", "sandbox-integration", "roi-benchmarks"]
+  "pages": ["ai-agents", "sandbox-integration", "security", "scalability-benchmarks", "roi-benchmarks", "custom-domains"]
 }
 

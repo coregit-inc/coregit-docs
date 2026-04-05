@@ -1,0 +1,211 @@
+---
+title: Security
+description: How Coregit protects your code — encryption, isolation, authentication, and more.
+---
+
+## Architecture overview
+
+Coregit runs on a serverless architecture designed to minimize attack surface:
+
+- **Cloudflare Workers** — no persistent servers, no SSH access, no long-running processes. Each request runs in an isolated V8 isolate with strict memory limits
+- **Cloudflare R2** — object storage for git data, protected by Cloudflare's network and access controls
+- **Neon PostgreSQL** — managed serverless database with encryption at rest and automated backups
+
+There are no servers to patch, no SSH keys to rotate, and no persistent processes that can be compromised.
+
+## Encryption at rest
+
+All data is encrypted at rest across three layers:
+
+| Layer | Encryption | Managed by |
+| --- | --- | --- |
+| Git objects (R2) | AES-256 | Cloudflare |
+| Database (Neon) | AES-256 storage volume encryption | Neon / AWS |
+| External tokens (GitHub/GitLab OAuth) | AES-256-GCM with random IV | Coregit application layer |
+| Webhook secrets | AES-256-GCM with random IV | Coregit application layer |
+
+External sync tokens and webhook secrets are encrypted at the application level before being written to the database. Even with full database access, these values cannot be read without the encryption key.
+
+## Encryption in transit
+
+All connections to Coregit use TLS 1.3, enforced by Cloudflare. HTTP connections are never accepted.
+
+Security headers on every response:
+
+```
+Strict-Transport-Security: max-age=31536000; includeSubDomains
+```
+
+The Git Smart HTTP protocol (`git clone`, `git push`) also uses HTTPS exclusively. Custom domains receive automatic SSL certificates via Cloudflare.
+
+## Tenant isolation
+
+Customer data is isolated at multiple levels:
+
+**Database level** — every query includes an `org_id` filter. There is no API path that can return data from a different organization:
+
+```sql
+SELECT * FROM repo WHERE org_id = $orgId AND slug = $slug
+```
+
+**Object storage level** — git objects are stored under organization-scoped paths:
+
+```
+{orgId}/{repoSlug}/objects/{sha[0:2]}/{sha[2:40]}
+```
+
+One organization cannot construct a path that accesses another organization's objects.
+
+**API key level** — API keys are bound to a single organization at creation time. A key from org A cannot authenticate against org B's resources.
+
+## Authentication
+
+Coregit supports two credential types:
+
+| Credential | Prefix | Scope | Lifetime |
+| --- | --- | --- | --- |
+| Master API key | `cgk_live_*` | Full organization access | Until rotated |
+| Scoped token | `cgt_*` | Specific repos, read or write | 1 hour – 30 days |
+
+**How keys are stored:**
+
+1. The key is shown to the user exactly once at creation
+2. A SHA-256 hash is computed and stored in the database
+3. On each request, the provided key is hashed and compared using a **timing-safe comparison** to prevent timing attacks
+4. Plaintext keys are never stored or logged
+
+Scoped tokens support granular permissions:
+
+```json
+{
+  "repos:my-app": ["read", "write"],
+  "repos:docs": ["read"]
+}
+```
+
+Tokens can be revoked instantly. Expired tokens are rejected automatically.
+
+## Rate limiting
+
+Coregit enforces rate limits at two levels to prevent abuse:
+
+| Level | Burst limit | Sustained limit |
+| --- | --- | --- |
+| Per API key | 600 req/min | 15,000 req/hr |
+| Per organization | 2,000 req/min | 50,000 req/hr |
+
+Rate limits use a sliding window algorithm. When limits are exceeded, responses include standard headers:
+
+```
+X-RateLimit-Limit: 600
+X-RateLimit-Remaining: 42
+X-RateLimit-Reset: 1712345678
+Retry-After: 12
+```
+
+These limits are intentionally generous — Coregit is designed for AI agent workloads with high request volume.
+
+## Input validation
+
+Every input is validated before processing:
+
+| Input | Validation |
+| --- | --- |
+| SHA hashes | Must be exactly 40 lowercase hex characters |
+| Ref/branch names | Follow `git-check-ref-format` rules — no `..`, `@{`, control chars |
+| File paths | No `..` traversal, no null bytes, no empty segments, max 4096 chars |
+| Request body | Max 5 MB for REST API, 32 MB for git push |
+| Commit changes | Max 1,000 files per commit, max 10 MB per file |
+| Commit messages | Max 50 KB |
+| Workspace commands | Max 10,000 characters |
+| Workspace cwd | Must be absolute path, max 1024 chars, no null bytes |
+| Workspace env | Max 50 variables, cannot override PATH/HOME/LD_PRELOAD |
+| Webhook URLs | HTTPS only, no private IPs, no localhost, no cloud metadata endpoints |
+
+## Content-addressed storage
+
+Git's content-addressed object model provides inherent tamper detection. Every object — blob, tree, commit — is identified by the SHA-1 hash of its contents.
+
+If a single bit of a file changes, its blob hash changes. That changes the tree hash. That changes the commit hash. The entire chain of trust from commits to files is cryptographically linked.
+
+This means:
+
+- Objects cannot be silently modified after creation
+- Any corruption is immediately detectable
+- Storage deduplication is automatic and safe
+
+## Webhook security
+
+Webhook deliveries are signed with HMAC-SHA256:
+
+```
+X-CoreGit-Signature: sha256=5d7c9a...
+X-CoreGit-Event: push
+X-CoreGit-Webhook-Id: wh_abc123
+```
+
+To verify a webhook delivery:
+
+```javascript
+const crypto = require('crypto');
+
+function verifyWebhook(body, secret, signature) {
+  const expected = 'sha256=' + crypto
+    .createHmac('sha256', secret)
+    .update(body)
+    .digest('hex');
+  return crypto.timingEqual(
+    Buffer.from(signature),
+    Buffer.from(expected)
+  );
+}
+```
+
+Webhook URLs must use HTTPS and cannot point to private IP ranges, localhost, or cloud metadata endpoints (SSRF protection).
+
+## Audit logging
+
+Every write operation is recorded in an immutable audit log:
+
+- Repository create, update, delete
+- Branch create, delete, merge
+- Scoped token create, revoke
+- Webhook create, update, delete
+- API commit creation
+
+Each entry includes: actor ID, actor type, action, affected resource, metadata, IP address, request ID, and timestamp.
+
+Query the audit log via API:
+
+```bash
+curl -H "x-api-key: $API_KEY" \
+  "https://api.coregit.dev/v1/audit-log?limit=50&action=repo.delete"
+```
+
+Supports filtering by action, resource type, and date range.
+
+## Security headers
+
+Every API response includes these headers:
+
+| Header | Value | Purpose |
+| --- | --- | --- |
+| `Strict-Transport-Security` | `max-age=31536000; includeSubDomains` | Force HTTPS |
+| `X-Content-Type-Options` | `nosniff` | Prevent MIME sniffing |
+| `X-Frame-Options` | `DENY` | Prevent clickjacking |
+| `Content-Security-Policy` | `default-src 'none'; frame-ancestors 'none'` | Strict CSP |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` | Limit referrer leakage |
+| `X-Request-Id` | `a1b2c3d4` | Unique ID for every request |
+
+## What Coregit does not store
+
+- **No plaintext API keys** — only SHA-256 hashes
+- **No plaintext external tokens** — AES-256-GCM encrypted
+- **No plaintext webhook secrets** — AES-256-GCM encrypted
+- **No server-side sessions** — stateless worker architecture
+- **No user passwords** — authentication is handled by the dashboard app via Better Auth, not the API
+- **No request bodies in logs** — only method, path, and error messages
+
+## Responsible disclosure
+
+If you discover a security vulnerability, please report it to **security@coregit.dev**. We will acknowledge receipt within 48 hours and work with you to address the issue.

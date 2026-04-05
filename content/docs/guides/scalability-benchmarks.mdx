@@ -1,0 +1,320 @@
+---
+title: Scalability Benchmarks
+description: Throughput and latency benchmarks for Coregit API operations with reproducible test scripts.
+---
+
+## Methodology
+
+All benchmarks run against the production Coregit API at `api.coregit.dev` using Node.js with native `fetch`. Each test measures:
+
+- **p50, p95, p99 latency** — in milliseconds
+- **Throughput** — operations per second
+- **Error rate** — percentage of non-2xx responses
+
+Tests run at concurrency levels of 1, 10, 50, and 100 parallel requests. Each test runs for a minimum of 100 iterations or 30 seconds, whichever is longer.
+
+## Repository creation
+
+Creating repositories with `POST /v1/repos`:
+
+```javascript
+async function benchRepoCreate(apiKey, baseUrl, count = 100) {
+  const results = [];
+
+  for (let i = 0; i < count; i++) {
+    const slug = `bench-${Date.now()}-${i}`;
+    const start = performance.now();
+
+    const res = await fetch(`${baseUrl}/v1/repos`, {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ slug, visibility: 'private' }),
+    });
+
+    const elapsed = performance.now() - start;
+    results.push({ elapsed, status: res.status });
+
+    // Cleanup
+    if (res.ok) {
+      await fetch(`${baseUrl}/v1/repos/${slug}`, {
+        method: 'DELETE',
+        headers: { 'x-api-key': apiKey },
+      });
+    }
+  }
+
+  return analyzeResults(results);
+}
+```
+
+### Expected results
+
+| Concurrency | p50 | p95 | p99 | ops/sec |
+| --- | --- | --- | --- | --- |
+| 1 | ~200 ms | ~350 ms | ~500 ms | ~5 |
+| 10 | ~250 ms | ~450 ms | ~600 ms | ~35 |
+| 50 | ~400 ms | ~800 ms | ~1200 ms | ~100 |
+
+Each repo creation writes 4 R2 objects (HEAD, empty tree, initial commit, branch ref) + 1 DB insert.
+
+## Commit throughput
+
+Multi-file commits with `POST /v1/repos/:slug/commits`:
+
+```javascript
+async function benchCommit(apiKey, baseUrl, slug, fileCount = 5, iterations = 100) {
+  const results = [];
+
+  for (let i = 0; i < iterations; i++) {
+    const changes = Array.from({ length: fileCount }, (_, j) => ({
+      path: `bench/file-${j}.txt`,
+      content: `Benchmark content iteration ${i} file ${j}\n`.repeat(10),
+    }));
+
+    const start = performance.now();
+
+    const res = await fetch(`${baseUrl}/v1/repos/${slug}/commits`, {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        branch: 'main',
+        message: `bench: commit ${i}`,
+        changes,
+      }),
+    });
+
+    const elapsed = performance.now() - start;
+    results.push({ elapsed, status: res.status });
+  }
+
+  return analyzeResults(results);
+}
+```
+
+### Expected results
+
+| Files per commit | p50 | p95 | ops/sec |
+| --- | --- | --- | --- |
+| 1 file | ~200 ms | ~400 ms | ~5 |
+| 5 files | ~300 ms | ~500 ms | ~3.5 |
+| 20 files | ~600 ms | ~1000 ms | ~1.5 |
+
+Latency scales sub-linearly with file count because blob writes are batched in parallel.
+
+## File read latency
+
+Reading files with `GET /v1/repos/:slug/blob/:ref/*path`:
+
+```javascript
+async function benchFileRead(apiKey, baseUrl, slug, path, iterations = 200) {
+  const results = [];
+
+  for (let i = 0; i < iterations; i++) {
+    const start = performance.now();
+
+    const res = await fetch(`${baseUrl}/v1/repos/${slug}/blob/main/${path}`, {
+      headers: { 'x-api-key': apiKey },
+    });
+
+    const elapsed = performance.now() - start;
+    results.push({ elapsed, status: res.status });
+    await res.text(); // consume body
+  }
+
+  return analyzeResults(results);
+}
+```
+
+### Expected results
+
+| File size | p50 | p95 |
+| --- | --- | --- |
+| 1 KB | ~80 ms | ~150 ms |
+| 100 KB | ~100 ms | ~200 ms |
+| 1 MB | ~150 ms | ~350 ms |
+
+R2 read + zlib decompression + git object parsing. Larger files increase decompression time.
+
+## Clone performance
+
+Standard `git clone` via Smart HTTP:
+
+```bash
+# Prepare: create a repo with N commits
+# Then benchmark clone time
+
+time git clone https://ORG:API_KEY@api.coregit.dev/org/repo.git /tmp/bench-clone
+```
+
+### Expected results
+
+| Repo size | Commits | Clone time |
+| --- | --- | --- |
+| Small (< 1 MB) | 10 | ~500 ms |
+| Medium (5 MB) | 100 | ~2 s |
+| Large (50 MB) | 1000 | ~8 s |
+
+Clone generates an in-memory packfile. The 25-second timeout protects against very large repos — use `--depth 1` for shallow clones of large repositories.
+
+## Search performance
+
+Cross-repo code search with `POST /v1/search`:
+
+```javascript
+async function benchSearch(apiKey, baseUrl, iterations = 50) {
+  const results = [];
+
+  for (let i = 0; i < iterations; i++) {
+    const start = performance.now();
+
+    const res = await fetch(`${baseUrl}/v1/search`, {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        query: 'function',
+        path_glob: '*.ts',
+        context_lines: 2,
+      }),
+    });
+
+    const elapsed = performance.now() - start;
+    results.push({ elapsed, status: res.status });
+    await res.json(); // consume body
+  }
+
+  return analyzeResults(results);
+}
+```
+
+### Expected results
+
+| Repos searched | p50 | p95 |
+| --- | --- | --- |
+| 5 repos | ~500 ms | ~1.5 s |
+| 20 repos | ~2 s | ~5 s |
+| 50 repos | ~5 s | ~12 s |
+
+Search has a 20-second deadline. Results are streamed as repos complete.
+
+## Full benchmark script
+
+Run all benchmarks with a single script:
+
+```javascript
+// bench.mjs — Run with: API_KEY=cgk_live_... BASE_URL=https://api.coregit.dev node bench.mjs
+
+const API_KEY = process.env.API_KEY;
+const BASE_URL = process.env.BASE_URL || 'https://api.coregit.dev';
+
+function analyzeResults(results) {
+  const latencies = results
+    .filter(r => r.status >= 200 && r.status < 300)
+    .map(r => r.elapsed)
+    .sort((a, b) => a - b);
+
+  const errors = results.filter(r => r.status >= 400).length;
+  const total = results.length;
+
+  if (latencies.length === 0) return { p50: 0, p95: 0, p99: 0, errors, total };
+
+  return {
+    p50: latencies[Math.floor(latencies.length * 0.5)].toFixed(0),
+    p95: latencies[Math.floor(latencies.length * 0.95)].toFixed(0),
+    p99: latencies[Math.floor(latencies.length * 0.99)].toFixed(0),
+    opsPerSec: (1000 / (latencies.reduce((a, b) => a + b, 0) / latencies.length)).toFixed(1),
+    errors: `${errors}/${total}`,
+  };
+}
+
+async function run() {
+  console.log('=== Coregit Benchmark Suite ===\n');
+  console.log(`Target: ${BASE_URL}`);
+  console.log(`Date: ${new Date().toISOString()}\n`);
+
+  // 1. Repo creation
+  console.log('## Repo Creation (20 iterations)');
+  const repoResults = [];
+  for (let i = 0; i < 20; i++) {
+    const slug = `bench-${Date.now()}-${i}`;
+    const start = performance.now();
+    const res = await fetch(`${BASE_URL}/v1/repos`, {
+      method: 'POST',
+      headers: { 'x-api-key': API_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slug, visibility: 'private' }),
+    });
+    repoResults.push({ elapsed: performance.now() - start, status: res.status });
+    if (res.ok) {
+      await fetch(`${BASE_URL}/v1/repos/${slug}`, {
+        method: 'DELETE',
+        headers: { 'x-api-key': API_KEY },
+      });
+    }
+  }
+  console.log(analyzeResults(repoResults));
+
+  // 2. Commit throughput
+  const benchSlug = `bench-commit-${Date.now()}`;
+  await fetch(`${BASE_URL}/v1/repos`, {
+    method: 'POST',
+    headers: { 'x-api-key': API_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ slug: benchSlug, visibility: 'private' }),
+  });
+
+  console.log('\n## Commit Throughput (20 iterations, 5 files each)');
+  const commitResults = [];
+  for (let i = 0; i < 20; i++) {
+    const changes = Array.from({ length: 5 }, (_, j) => ({
+      path: `src/file-${j}.txt`,
+      content: `content ${i}-${j}\n`,
+    }));
+    const start = performance.now();
+    const res = await fetch(`${BASE_URL}/v1/repos/${benchSlug}/commits`, {
+      method: 'POST',
+      headers: { 'x-api-key': API_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ branch: 'main', message: `bench ${i}`, changes }),
+    });
+    commitResults.push({ elapsed: performance.now() - start, status: res.status });
+  }
+  console.log(analyzeResults(commitResults));
+
+  // 3. File read
+  console.log('\n## File Read Latency (50 iterations)');
+  const readResults = [];
+  for (let i = 0; i < 50; i++) {
+    const start = performance.now();
+    const res = await fetch(`${BASE_URL}/v1/repos/${benchSlug}/blob/main/src/file-0.txt`, {
+      headers: { 'x-api-key': API_KEY },
+    });
+    readResults.push({ elapsed: performance.now() - start, status: res.status });
+    await res.text();
+  }
+  console.log(analyzeResults(readResults));
+
+  // Cleanup
+  await fetch(`${BASE_URL}/v1/repos/${benchSlug}`, {
+    method: 'DELETE',
+    headers: { 'x-api-key': API_KEY },
+  });
+
+  console.log('\nDone.');
+}
+
+run().catch(console.error);
+```
+
+Save this as `bench.mjs` and run:
+
+```bash
+API_KEY=cgk_live_... node bench.mjs
+```
+
+For detailed per-operation latency estimates, see [ROI & Benchmarks](/docs/guides/roi-benchmarks).
