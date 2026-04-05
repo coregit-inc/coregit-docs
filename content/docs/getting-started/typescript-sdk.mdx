@@ -215,22 +215,22 @@ const { data } = await git.branches.get("my-repo", "feature-x");
 console.log(data.sha); // head commit SHA
 
 // Merge (fast-forward)
-const { data } = await git.branches.merge("my-repo", "feature-x", {
-  target: "main",
+const { data } = await git.branches.merge("my-repo", "main", {
+  source: "feature-x",
 });
 console.log(data.strategy); // "fast-forward" | "already_up_to_date"
 
 // Merge (merge-commit — supports diverged branches)
-const { data } = await git.branches.merge("my-repo", "feature-x", {
-  target: "main",
+const { data } = await git.branches.merge("my-repo", "main", {
+  source: "feature-x",
   strategy: "merge-commit",
   message: "Merge feature-x into main",
 });
 console.log(data.merge_sha); // merge commit SHA
 
 // Merge (squash — all changes as a single commit)
-const { data } = await git.branches.merge("my-repo", "feature-x", {
-  target: "main",
+const { data } = await git.branches.merge("my-repo", "main", {
+  source: "feature-x",
   strategy: "squash",
 });
 

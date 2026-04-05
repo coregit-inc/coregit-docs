@@ -111,6 +111,25 @@ When creating a repository, pass the optional `namespace` field:
 
 The `namespace` field appears in all repository responses (`null` when not set).
 
+## Public API (No Auth Required)
+
+Public repositories can be read without authentication using org-scoped routes:
+
+```
+/v1/orgs/:orgSlug/repos                              — List public repos
+/v1/orgs/:orgSlug/repos/:slug                        — Get public repo
+/v1/orgs/:orgSlug/repos/:slug/refs                   — List refs
+/v1/orgs/:orgSlug/repos/:slug/tree/:ref/*path        — Browse directory
+/v1/orgs/:orgSlug/repos/:slug/blob/:ref/*path        — Read file
+/v1/orgs/:orgSlug/repos/:slug/commits                — List commits
+/v1/orgs/:orgSlug/repos/:slug/commits/:sha           — Get commit
+/v1/orgs/:orgSlug/repos/:slug/diff?base=...&head=... — Diff
+```
+
+Namespaced variants are also available: `/v1/orgs/:orgSlug/repos/:namespace/:slug/...`
+
+These endpoints only return data from repositories with `visibility: "public"`. Write operations always require authentication.
+
 ## Rate Limits
 
 Per-key sliding window rate limiting applies to all authenticated requests:

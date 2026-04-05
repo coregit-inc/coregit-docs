@@ -98,6 +98,34 @@ Both fields are optional. If `access_token` is provided, it is re-validated agai
 { "updated": true }
 ```
 
+## Test Connection
+
+```http
+POST /v1/connections/:id/test
+```
+
+**Permission:** Any API key (master or scoped).
+
+Validates the stored token against the provider API without modifying anything.
+
+### Response `200`
+
+```json
+{
+  "valid": true,
+  "username": "octocat"
+}
+```
+
+If the token is expired or revoked:
+
+```json
+{
+  "valid": false,
+  "error": "GitHub token validation failed: 401 Bad credentials"
+}
+```
+
 ## Delete Connection
 
 ```http
@@ -133,6 +161,10 @@ console.log(data.connections);
 await git.connections.update(conn.id, {
   access_token: "ghp_new_token",
 });
+
+// Test connection health
+const { data: test } = await git.connections.test(conn.id);
+console.log(test.valid); // true
 
 // Delete
 await git.connections.delete(conn.id);

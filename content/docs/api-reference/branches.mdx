@@ -72,16 +72,16 @@ POST /v1/repos/:slug/branches/:name/merge
 POST /v1/repos/:namespace/:slug/branches/:name/merge
 ```
 
-The `:name` in the URL is the **source branch** (the branch being merged). The request body specifies the **target** and **strategy**:
+The `:name` in the URL is the **target branch** (the branch being merged into). The request body specifies the **source** branch and **strategy**:
 
 ```json
 {
-  "target": "main",
+  "source": "feature-x",
   "strategy": "fast-forward"
 }
 ```
 
-- `target` — Target branch to merge into (optional, defaults to the repo's default branch)
+- `source` — Source branch to merge from (required)
 - `strategy` — Merge strategy (optional, default: `"fast-forward"`). One of: `"fast-forward"`, `"merge-commit"`, `"squash"`
 - `message` — Custom commit message (optional, used with `merge-commit` and `squash`)
 - `author` — `{ name, email }` for the merge commit author (optional, used with `merge-commit` and `squash`)
@@ -90,12 +90,12 @@ The `:name` in the URL is the **source branch** (the branch being merged). The r
 For example, to merge `feature-x` into `main`:
 
 ```http
-POST /v1/repos/my-app/branches/feature-x/merge
+POST /v1/repos/my-app/branches/main/merge
 ```
 
 ```json
 {
-  "target": "main",
+  "source": "feature-x",
   "strategy": "merge-commit",
   "message": "Merge feature-x into main"
 }

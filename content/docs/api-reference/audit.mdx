@@ -1,0 +1,93 @@
+---
+title: Audit Log
+description: View an immutable record of all security-relevant actions in your organization.
+---
+
+## Overview
+
+The audit log records all write operations and security events in your organization. Each entry captures the actor, action, affected resource, and request metadata.
+
+## List Audit Events
+
+```http
+GET /v1/audit-log
+```
+
+**Permission:** Master API key only.
+
+### Query Parameters
+
+| Parameter | Description |
+|-----------|-------------|
+| `limit` | Items per page (1-200, default 50) |
+| `cursor` | Pagination cursor (event ID from `next_cursor`) |
+| `action` | Filter by action (e.g. `repo.create`, `token.create`) |
+| `resource_type` | Filter by resource type (e.g. `repo`, `token`, `branch`) |
+| `since` | ISO 8601 timestamp — only events after this time |
+| `until` | ISO 8601 timestamp — only events before this time |
+
+### Response `200`
+
+```json
+{
+  "events": [
+    {
+      "id": 42,
+      "actor_id": "key_abc123",
+      "actor_type": "master_key",
+      "action": "repo.create",
+      "resource_type": "repo",
+      "resource_id": "repo_xyz",
+      "metadata": { "slug": "my-app", "visibility": "private" },
+      "ip_address": "203.0.113.1",
+      "request_id": "a1b2c3d4",
+      "created_at": "2026-04-05T12:00:00Z"
+    }
+  ],
+  "next_cursor": "41"
+}
+```
+
+### Actor Types
+
+| Type | Description |
+|------|-------------|
+| `master_key` | Action performed with a master API key |
+| `scoped_token` | Action performed with a scoped token |
+| `internal` | Action performed by the system (e.g. sync webhook) |
+
+### Common Actions
+
+| Action | Resource Type | Trigger |
+|--------|--------------|---------|
+| `repo.create` | `repo` | Repository created |
+| `repo.delete` | `repo` | Repository deleted |
+| `branch.create` | `branch` | Branch created |
+| `branch.delete` | `branch` | Branch deleted |
+| `token.create` | `token` | Scoped token created |
+| `token.revoke` | `token` | Scoped token revoked |
+| `webhook.create` | `webhook` | Webhook created |
+| `webhook.delete` | `webhook` | Webhook deleted |
+
+## SDK Examples
+
+```typescript
+// List recent events
+const { data } = await git.audit.list({ limit: 20 });
+console.log(data.events);
+
+// Filter by action
+const { data } = await git.audit.list({
+  action: "repo.create",
+  since: "2026-04-01T00:00:00Z",
+});
+
+// Paginate
+const { data: page1 } = await git.audit.list({ limit: 50 });
+if (page1.next_cursor) {
+  const { data: page2 } = await git.audit.list({
+    limit: 50,
+    cursor: page1.next_cursor,
+  });
+}
+```
