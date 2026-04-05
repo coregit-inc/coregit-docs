@@ -1,0 +1,139 @@
+---
+title: Connections
+description: Manage external provider connections (GitHub, GitLab) for repository sync.
+---
+
+## Overview
+
+Connections store encrypted access tokens for GitHub and GitLab. They are used by [sync configurations](/docs/api-reference/sync) to import from or export to external repositories.
+
+Tokens are validated against the provider API on creation and encrypted with AES-256-GCM before storage. Plaintext tokens are never stored or returned after creation.
+
+## Create Connection
+
+```http
+POST /v1/connections
+```
+
+**Permission:** Master API key only.
+
+```json
+{
+  "provider": "github",
+  "label": "My GitHub PAT",
+  "access_token": "ghp_xxxxxxxxxxxx"
+}
+```
+
+### Fields
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `provider` | Yes | `"github"` or `"gitlab"` |
+| `label` | Yes | Human-readable name for this connection |
+| `access_token` | Yes | Personal access token or bearer token |
+
+### Response `201`
+
+```json
+{
+  "id": "abc123",
+  "provider": "github",
+  "label": "My GitHub PAT",
+  "external_username": "octocat",
+  "created_at": "2026-04-05T12:00:00Z"
+}
+```
+
+The `external_username` is automatically fetched from the provider API during token validation.
+
+## List Connections
+
+```http
+GET /v1/connections
+```
+
+**Permission:** Any API key (master or scoped).
+
+### Response `200`
+
+```json
+{
+  "connections": [
+    {
+      "id": "abc123",
+      "provider": "github",
+      "label": "My GitHub PAT",
+      "external_username": "octocat",
+      "last_synced_at": "2026-04-05T12:30:00Z",
+      "created_at": "2026-04-05T12:00:00Z",
+      "updated_at": "2026-04-05T12:00:00Z"
+    }
+  ]
+}
+```
+
+Access tokens are never included in responses.
+
+## Update Connection
+
+```http
+PATCH /v1/connections/:id
+```
+
+**Permission:** Master API key only.
+
+```json
+{
+  "label": "Updated label",
+  "access_token": "ghp_new_token"
+}
+```
+
+Both fields are optional. If `access_token` is provided, it is re-validated against the provider API and the `external_username` is updated.
+
+### Response `200`
+
+```json
+{ "updated": true }
+```
+
+## Delete Connection
+
+```http
+DELETE /v1/connections/:id
+```
+
+**Permission:** Master API key only.
+
+Deleting a connection cascades to all sync configurations that reference it.
+
+### Response `200`
+
+```json
+{ "deleted": true }
+```
+
+## SDK Examples
+
+```typescript
+// Create a GitHub connection
+const { data: conn } = await git.connections.create({
+  provider: "github",
+  label: "CI/CD Token",
+  access_token: "ghp_xxxxxxxxxxxx",
+});
+console.log(conn.external_username); // "octocat"
+
+// List all connections
+const { data } = await git.connections.list();
+console.log(data.connections);
+
+// Rotate a token
+await git.connections.update(conn.id, {
+  access_token: "ghp_new_token",
+});
+
+// Delete
+await git.connections.delete(conn.id);
+```

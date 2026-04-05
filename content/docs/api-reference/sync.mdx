@@ -1,11 +1,145 @@
 ---
 title: Sync
-description: Synchronize repositories from GitHub and GitLab into CoreGit.
+description: Synchronize repositories between Coregit and GitHub/GitLab — import, export, and auto-sync.
 ---
+
+## Overview
+
+Sync connects a Coregit repository to an external GitHub or GitLab repository. It supports:
+
+- **Import** — pull changes from GitHub/GitLab into Coregit
+- **Export** — push changes from Coregit to GitHub/GitLab
+- **Auto-sync** — automatically trigger sync on push events via webhooks
+
+Sync requires a [connection](/docs/api-reference/connections) with a valid provider token.
+
+## Create Sync Config
+
+Link a Coregit repo to an external repository.
+
+```http
+POST /v1/repos/:slug/sync/config
+POST /v1/repos/:namespace/:slug/sync/config
+```
+
+**Permission:** Master API key only.
+
+```json
+{
+  "connection_id": "conn_abc123",
+  "remote": "octocat/my-repo",
+  "direction": "import",
+  "branch": "main",
+  "auto_sync": true
+}
+```
+
+### Fields
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `connection_id` | Yes | ID of an existing [connection](/docs/api-reference/connections) |
+| `remote` | Yes | `owner/repo` (GitHub) or `group/project` (GitLab) |
+| `direction` | No | `"import"` (default) or `"export"` |
+| `branch` | No | Branch to sync (default: repo's default branch) |
+| `auto_sync` | No | Enable webhook-based auto-sync (default: `false`) |
+
+### Response `201`
+
+```json
+{
+  "id": "sync_xyz",
+  "repo_id": "repo_abc",
+  "connection_id": "conn_abc123",
+  "provider": "github",
+  "remote": "octocat/my-repo",
+  "branch": "main",
+  "direction": "import",
+  "auto_sync": true,
+  "webhook_id": 12345
+}
+```
+
+When `auto_sync` is `true` and direction is `import`, Coregit registers a push webhook on the external repository. For `export`, auto-sync triggers after every `git push` to Coregit.
+
+## Get Sync Config
+
+```http
+GET /v1/repos/:slug/sync/config
+GET /v1/repos/:namespace/:slug/sync/config
+```
+
+**Permission:** Any API key.
+
+### Response `200`
+
+```json
+{
+  "config": {
+    "id": "sync_xyz",
+    "connection_id": "conn_abc123",
+    "provider": "github",
+    "remote": "octocat/my-repo",
+    "branch": "main",
+    "direction": "import",
+    "auto_sync": true,
+    "last_synced_sha": "7f3b...",
+    "last_synced_at": "2026-04-05T12:30:00Z",
+    "last_error": null,
+    "connection": {
+      "label": "My GitHub PAT",
+      "external_username": "octocat"
+    }
+  }
+}
+```
+
+Returns `{ "config": null }` if no sync config exists.
+
+## Update Sync Config
+
+```http
+PATCH /v1/repos/:slug/sync/config
+PATCH /v1/repos/:namespace/:slug/sync/config
+```
+
+**Permission:** Master API key only.
+
+```json
+{
+  "direction": "export",
+  "auto_sync": true,
+  "branch": "develop",
+  "remote": "octocat/other-repo"
+}
+```
+
+All fields are optional.
+
+### Response `200`
+
+```json
+{ "updated": true }
+```
+
+## Delete Sync Config
+
+```http
+DELETE /v1/repos/:slug/sync/config
+DELETE /v1/repos/:namespace/:slug/sync/config
+```
+
+**Permission:** Master API key only.
+
+### Response `200`
+
+```json
+{ "deleted": true }
+```
 
 ## Trigger Sync
 
-Pull the latest state from an external Git provider (GitHub or GitLab) into a CoreGit repository. Uses archive-based download — no direct git access needed, only a user access token.
+Manually trigger an import or export sync.
 
 ```http
 POST /v1/repos/:slug/sync
@@ -16,7 +150,7 @@ POST /v1/repos/:namespace/:slug/sync
 
 ```json
 {
-  "sync_id": "sync_abc123",
+  "sync_id": "sync_xyz",
   "branch": "main"
 }
 ```
@@ -25,8 +159,8 @@ POST /v1/repos/:namespace/:slug/sync
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `sync_id` | Yes | Sync configuration ID (created via dashboard) |
-| `branch` | No | Target branch (default: sync config's default branch) |
+| `sync_id` | Yes | Sync configuration ID |
+| `branch` | No | Target branch (default: sync config's branch) |
 
 ### Response `200`
 
@@ -36,7 +170,8 @@ POST /v1/repos/:namespace/:slug/sync
   "remote_sha": "7f3b...",
   "commit_sha": "a1c2...",
   "files_changed": 42,
-  "deleted": 3
+  "deleted": 3,
+  "direction": "import"
 }
 ```
 
@@ -44,59 +179,124 @@ POST /v1/repos/:namespace/:slug/sync
 |-------|-------------|
 | `synced` | `true` if changes were applied, `false` if already up to date |
 | `remote_sha` | Latest commit SHA on the remote |
-| `commit_sha` | CoreGit commit SHA created by this sync (null if no changes) |
+| `commit_sha` | Commit SHA created by this sync (null if no changes) |
 | `files_changed` | Number of files created or updated |
 | `deleted` | Number of files deleted |
+| `direction` | `"import"` or `"export"` |
 
-## How Sync Works
+## Sync History
 
-1. CoreGit downloads the repository archive from the provider (GitHub tarball or GitLab archive)
-2. Compares contents against the last synced state
+View past sync runs for a repository.
+
+```http
+GET /v1/repos/:slug/sync/history
+GET /v1/repos/:namespace/:slug/sync/history
+```
+
+**Permission:** Any API key.
+
+### Query Parameters
+
+| Param | Default | Description |
+|-------|---------|-------------|
+| `limit` | 20 | Max results (1–100) |
+| `cursor` | — | Pagination cursor from previous response |
+
+### Response `200`
+
+```json
+{
+  "runs": [
+    {
+      "id": "run_abc",
+      "status": "success",
+      "message": "Imported 15 files",
+      "remote_sha": "7f3b...",
+      "commit_sha": "a1c2...",
+      "started_at": "2026-04-05T12:30:00Z",
+      "completed_at": "2026-04-05T12:30:02Z"
+    }
+  ],
+  "next_cursor": null
+}
+```
+
+Status values: `running`, `success`, `skipped`, `error`.
+
+## How Import Works
+
+1. Coregit downloads the latest state from GitHub/GitLab
+2. Compares against the last synced commit
 3. Creates a single commit with all changes (additions, modifications, deletions)
-4. Updates the sync configuration with the new remote SHA
+4. Updates the sync config with the new remote SHA
 
-### Supported Providers
+## How Export Works
+
+1. Coregit snapshots the current tree on the configured branch
+2. Diffs against the tree at `last_synced_sha`
+3. Creates blobs and commits on GitHub/GitLab via their API
+4. Updates the remote branch ref
+
+For GitHub, blobs are created in parallel batches of 20. For GitLab, file actions are batched in groups of 500.
+
+## Auto-Sync
+
+### Import auto-sync
+
+When `auto_sync: true` and `direction: "import"`, Coregit registers a push webhook on the external repository. Every push to the configured branch triggers an automatic import.
+
+Webhook signatures are verified using HMAC-SHA256 (GitHub) or token comparison (GitLab).
+
+### Export auto-sync
+
+When `auto_sync: true` and `direction: "export"`, every `git push` to the Coregit repository automatically triggers an export to the external provider. This happens asynchronously after the push completes.
+
+## Supported Providers
 
 | Provider | Remote Format | Example |
 |----------|--------------|---------|
 | GitHub | `owner/repo` | `strayl/coregit` |
 | GitLab | `group/project` | `mygroup/myproject` |
 
-### Limits
-
-- Max archive size: **50 MB**
-- Max file size: **5 MB** per file
-- Max files: **5,000** per sync
-
-## Setup
-
-Sync configurations are managed through the CoreGit dashboard:
-
-1. Connect your GitHub or GitLab account (OAuth)
-2. Create a sync configuration for a repository, specifying the remote and branch
-3. Trigger syncs via the API or enable auto-sync
-
-## SDK Example
+## SDK Examples
 
 ```typescript
-const { data } = await git.sync.trigger("my-repo", {
-  sync_id: "sync_abc123",
-  branch: "main",
+// Create a connection first
+const { data: conn } = await git.connections.create({
+  provider: "github",
+  label: "Sync Token",
+  access_token: "ghp_xxxxxxxxxxxx",
 });
 
-if (data.synced) {
-  console.log(`Synced ${data.files_changed} files`);
-  console.log(`Commit: ${data.commit_sha}`);
-} else {
-  console.log("Already up to date");
+// Set up import sync with auto-sync
+const { data: config } = await git.sync.createConfig("my-repo", {
+  connection_id: conn.id,
+  remote: "octocat/my-repo",
+  direction: "import",
+  auto_sync: true,
+});
+
+// Manual sync trigger
+const { data: result } = await git.sync.trigger("my-repo", {
+  sync_id: config.id,
+});
+
+if (result.synced) {
+  console.log(`Synced ${result.files_changed} files`);
 }
-```
 
-With namespaces:
+// Check sync history
+const { data: history } = await git.sync.history("my-repo", { limit: 10 });
+for (const run of history.runs) {
+  console.log(`${run.status}: ${run.message}`);
+}
 
-```typescript
-const { data } = await git.sync.trigger(
-  { namespace: "alice", slug: "my-repo" },
-  { sync_id: "sync_abc123" },
-);
+// Switch to export
+await git.sync.updateConfig("my-repo", {
+  direction: "export",
+  auto_sync: true,
+});
+
+// Delete sync config
+await git.sync.deleteConfig("my-repo");
 ```
