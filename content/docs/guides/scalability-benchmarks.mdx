@@ -3,6 +3,23 @@ title: Scalability Benchmarks
 description: Throughput and latency benchmarks for Coregit API operations with reproducible test scripts.
 ---
 
+## Overview
+
+| Operation | p50 | p95 | Bottleneck |
+| --- | --- | --- | --- |
+| Create repo | ~200 ms | ~350 ms | 4 R2 writes + 1 DB insert |
+| Commit (1 file) | ~200 ms | ~400 ms | Blob hash + tree build + CAS |
+| Commit (5 files) | ~300 ms | ~500 ms | Parallel blob writes |
+| Commit (20 files) | ~600 ms | ~1000 ms | Tree construction |
+| Read file (1 KB) | ~80 ms | ~150 ms | R2 read + decompress |
+| Read file (1 MB) | ~150 ms | ~350 ms | Decompression |
+| Clone (10 commits) | ~500 ms | ~800 ms | In-memory packfile |
+| Clone (1000 commits) | ~8 s | ~12 s | Packfile generation |
+| Search (5 repos) | ~500 ms | ~1.5 s | Tree walk + blob scan |
+| Search (50 repos) | ~5 s | ~12 s | 20s deadline cap |
+
+All numbers measured at concurrency 1 against `api.coregit.dev`. Higher concurrency increases p95/p99 but maintains throughput. See individual sections below for details.
+
 ## Methodology
 
 All benchmarks run against the production Coregit API at `api.coregit.dev` using Node.js with native `fetch`. Each test measures:
