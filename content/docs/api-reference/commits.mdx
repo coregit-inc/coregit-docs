@@ -21,13 +21,11 @@ POST /v1/repos/:namespace/:slug/commits
   "changes": [
     {
       "path": "index.html",
-      "content": "<h1>Hello</h1>",
-      "action": "create"
+      "content": "<h1>Hello</h1>"
     },
     {
       "path": "config.json",
-      "content": "{\"version\": 2}",
-      "action": "modify"
+      "content": "{\"version\": 2}"
     },
     {
       "path": "old-file.txt",
@@ -46,7 +44,7 @@ Each entry in `changes` describes a file operation.
 | `path` | Yes | File path (no traversal) |
 | `content` | No | File content (required unless deleting) |
 | `encoding` | No | `utf-8` (default) or `base64` |
-| `action` | No | `"create"`, `"modify"`, or `"delete"` (default: `"modify"`) |
+| `action` | No | Set to `"delete"` to remove a file. Omit for create/modify operations |
 
 ### Fields
 
