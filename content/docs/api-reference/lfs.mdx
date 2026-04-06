@@ -1,0 +1,202 @@
+---
+title: Git LFS
+description: Store large files (images, models, binaries) with Git LFS support via presigned R2 URLs.
+---
+
+## Overview
+
+CoreGit supports the [Git LFS](https://git-lfs.com/) protocol for storing large files outside the git tree. The standard `git lfs` client works out of the box — no special configuration needed.
+
+LFS objects are stored in a dedicated Cloudflare R2 bucket with presigned URLs for direct upload/download. The CoreGit Worker never proxies file data.
+
+## Setup
+
+Track large files with `.gitattributes`:
+
+```bash
+git lfs track "*.psd"
+git lfs track "*.png"
+git lfs track "models/**"
+git add .gitattributes
+```
+
+Clone and push as usual:
+
+```bash
+git clone https://org-slug:API_KEY@api.coregit.dev/org/repo.git
+git lfs push --all origin main
+```
+
+## Batch API
+
+The Batch API is the core LFS endpoint. Git LFS clients call it automatically.
+
+```http
+POST /:org/:repo.git/info/lfs/objects/batch
+Authorization: Basic {base64(orgSlug:apiKey)}
+Content-Type: application/vnd.git-lfs+json
+Accept: application/vnd.git-lfs+json
+```
+
+### Upload Request
+
+```json
+{
+  "operation": "upload",
+  "transfers": ["basic"],
+  "objects": [
+    { "oid": "abc123...64hex", "size": 52428800 }
+  ]
+}
+```
+
+### Upload Response
+
+```json
+{
+  "transfer": "basic",
+  "objects": [
+    {
+      "oid": "abc123...",
+      "size": 52428800,
+      "actions": {
+        "upload": {
+          "href": "https://....r2.cloudflarestorage.com/coregit-lfs/...",
+          "header": { "Content-Type": "application/octet-stream" },
+          "expires_in": 900
+        },
+        "verify": {
+          "href": "https://api.coregit.dev/org/repo.git/info/lfs/verify",
+          "expires_in": 900
+        }
+      }
+    }
+  ]
+}
+```
+
+If the object already exists, `actions` is omitted (client skips upload).
+
+### Download Response
+
+```json
+{
+  "transfer": "basic",
+  "objects": [
+    {
+      "oid": "abc123...",
+      "size": 52428800,
+      "actions": {
+        "download": {
+          "href": "https://....r2.cloudflarestorage.com/coregit-lfs/...",
+          "expires_in": 3600
+        }
+      }
+    }
+  ]
+}
+```
+
+### Public Repos
+
+Download operations work without authentication for public repositories, matching `git clone` behavior.
+
+## Verify Callback
+
+After upload, the client calls the verify endpoint to confirm the object was stored:
+
+```http
+POST /:org/:repo.git/info/lfs/verify
+```
+
+```json
+{ "oid": "abc123...", "size": 52428800 }
+```
+
+The server checks R2 for the object and validates the size matches. Returns `200` on success.
+
+## File Locking
+
+Prevent conflicts on binary files that can't be merged.
+
+### Create Lock
+
+```http
+POST /:org/:repo.git/info/lfs/locks
+```
+
+```json
+{ "path": "assets/logo.psd" }
+```
+
+**Response** `201`:
+```json
+{
+  "lock": {
+    "id": "lock_abc",
+    "path": "assets/logo.psd",
+    "locked_at": "2026-04-06T12:00:00Z",
+    "owner": { "name": "key_xyz" }
+  }
+}
+```
+
+Returns `409` if the file is already locked by another user.
+
+### List Locks
+
+```http
+GET /:org/:repo.git/info/lfs/locks?path=assets/logo.psd
+```
+
+### Verify Locks
+
+```http
+POST /:org/:repo.git/info/lfs/locks/verify
+```
+
+Splits locks into `ours` (current user) and `theirs` (others). Git LFS blocks push if modified files are in `theirs`.
+
+### Unlock
+
+```http
+POST /:org/:repo.git/info/lfs/locks/:id/unlock
+```
+
+```json
+{ "force": false }
+```
+
+Set `force: true` with a master API key to unlock files locked by other users.
+
+## Limits
+
+| Tier | Max File Size | Objects per Batch |
+|------|---------------|-------------------|
+| Free | 100 MB | 20 |
+| Usage | 2 GB | 100 |
+| Enterprise | Custom | Custom |
+
+LFS storage and transfer count toward your org's existing storage and transfer quotas. No separate LFS billing.
+
+## SDK Examples
+
+```typescript
+// List LFS locks
+const { data } = await git.lfs.listLocks("my-repo");
+console.log(data.locks);
+
+// Lock a file before editing
+await git.lfs.createLock("my-repo", "assets/logo.psd");
+
+// Verify which locks are yours vs others'
+const { data: verify } = await git.lfs.verifyLocks("my-repo");
+console.log("Mine:", verify.ours);
+console.log("Theirs:", verify.theirs);
+
+// Unlock when done
+await git.lfs.unlock("my-repo", "lock_abc");
+
+// Force unlock (master key only)
+await git.lfs.unlock("my-repo", "lock_abc", { force: true });
+```
