@@ -1,0 +1,224 @@
+---
+title: Semantic Search
+description: AI-powered code search using natural language queries.
+---
+
+Search code by intent, not just keywords. Semantic search uses AI embeddings to find relevant code even when the exact terms don't appear in the file. Powered by Voyage AI code embeddings and reranking.
+
+## How It Works
+
+1. **Index** your repository — code is chunked, embedded, and stored in a vector database
+2. **Search** with natural language — your query is embedded and matched against code vectors
+3. **Rerank** — top candidates are reranked by a cross-attention model for precision
+
+Text is never stored in the vector database. Code is fetched from Git storage on the fly for reranking.
+
+## Index a Repository
+
+Before searching, you must index the repository branch.
+
+```http
+POST /v1/repos/:slug/index
+```
+
+**Permission:** Write access required.
+
+```json
+{
+  "branch": "main"
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `branch` | No | Branch to index (default: repo's default branch) |
+
+### Response `202`
+
+```json
+{
+  "message": "Reindex queued",
+  "repo_slug": "my-app",
+  "branch": "main"
+}
+```
+
+Indexing is asynchronous. Poll the status endpoint to check progress.
+
+## Check Index Status
+
+```http
+GET /v1/repos/:slug/index/status?branch=main
+```
+
+**Permission:** Read access required.
+
+### Response `200`
+
+```json
+{
+  "indexed": true,
+  "status": "ready",
+  "branch": "main",
+  "last_commit_sha": "8b7d315321...",
+  "chunks_count": 42,
+  "total_batches": 1,
+  "processed_batches": 1,
+  "indexed_at": "2026-04-06T16:02:55.687Z",
+  "error": null
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `indexed` | `true` when status is `"ready"` |
+| `status` | `"not_indexed"` \| `"pending"` \| `"indexing"` \| `"ready"` \| `"failed"` |
+| `chunks_count` | Number of code chunks indexed |
+| `total_batches` | Total indexing batches (for large repos) |
+| `processed_batches` | Completed batches |
+| `indexed_at` | When the index was last updated |
+| `error` | Error message if status is `"failed"` |
+
+## Semantic Search
+
+```http
+POST /v1/repos/:slug/semantic-search
+```
+
+**Permission:** Read access required.
+
+```json
+{
+  "q": "user authentication with password verification",
+  "branch": "main",
+  "language": "typescript",
+  "top_k": 10
+}
+```
+
+### Fields
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `q` | Yes | Natural language search query (max 1000 chars) |
+| `branch` | No | Branch to search (default: repo's default branch) |
+| `path_pattern` | No | Glob filter on file paths (e.g., `"src/*.ts"`) |
+| `language` | No | Filter by programming language (e.g., `"typescript"`, `"python"`) |
+| `top_k` | No | Number of results to return (default: 10, max: 50) |
+
+### Response `200`
+
+```json
+{
+  "results": [
+    {
+      "file_path": "src/services/user-service.ts",
+      "score": 0.738,
+      "language": "typescript",
+      "start_line": 1,
+      "end_line": 63,
+      "snippet": "import { db } from \"../db\";\nimport { hash, compare } from \"bcrypt\";\n\nexport class UserService {\n  async authenticate(email: string, password: string) {\n    ...\n  }\n}"
+    },
+    {
+      "file_path": "src/auth/middleware.ts",
+      "score": 0.562,
+      "language": "typescript",
+      "start_line": 1,
+      "end_line": 43,
+      "snippet": "..."
+    }
+  ],
+  "query": "user authentication with password verification",
+  "repo_slug": "my-app",
+  "branch": "main"
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `results` | Array of matching code chunks, sorted by relevance |
+| `results[].file_path` | Path to the file in the repository |
+| `results[].score` | Relevance score from 0 to 1 (higher is better) |
+| `results[].language` | Detected programming language |
+| `results[].start_line` | Start line of the matched chunk |
+| `results[].end_line` | End line of the matched chunk |
+| `results[].snippet` | The actual code content |
+
+### Error Responses
+
+| Status | Description |
+|--------|-------------|
+| `404` | Branch is not indexed. Call `POST /index` first. |
+| `202` | Indexing is in progress. Retry after it completes. |
+| `503` | Semantic search is not configured on the server. |
+
+## Delete Index
+
+```http
+DELETE /v1/repos/:slug/index
+```
+
+**Permission:** Write access required.
+
+```json
+{
+  "branch": "main"
+}
+```
+
+### Response `200`
+
+```json
+{
+  "deleted": true,
+  "branch": "main"
+}
+```
+
+## Auto-Indexing
+
+Set `auto_index: true` when creating a repository to automatically index new commits:
+
+```json
+{
+  "slug": "my-app",
+  "auto_index": true
+}
+```
+
+When enabled, every commit triggers incremental indexing — only changed files are re-embedded.
+
+## SDK Examples
+
+```typescript
+const git = createCoregitClient({ apiKey: "cgk_live_..." });
+
+// 1. Trigger indexing
+await git.search.triggerIndex("my-app", { branch: "main" });
+
+// 2. Wait for indexing to complete
+let status;
+do {
+  const { data } = await git.search.indexStatus("my-app", "main");
+  status = data?.status;
+  if (status === "indexing") await new Promise(r => setTimeout(r, 2000));
+} while (status === "indexing");
+
+// 3. Semantic search
+const { data } = await git.search.semantic("my-app", {
+  q: "function that handles user login and session creation",
+  top_k: 5,
+});
+
+for (const result of data.results) {
+  console.log(`${result.file_path} (score: ${result.score.toFixed(2)})`);
+  console.log(`  Lines ${result.start_line}-${result.end_line}`);
+}
+
+// Filter by language
+const { data: tsResults } = await git.search.semantic("my-app", {
+  q: "database connection pooling",
+  language: "typescript",
+  path_pattern: "src/**/*.ts",
+});
+```
