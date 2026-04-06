@@ -1,173 +1,286 @@
 ---
-title: Git LFS
-description: Store large files (images, models, binaries) with Git LFS support via presigned R2 URLs.
+title: LFS API
+description: Git LFS Batch API, verify callback, and file locking endpoints.
 ---
 
 ## Overview
 
-CoreGit supports the [Git LFS](https://git-lfs.com/) protocol for storing large files outside the git tree. The standard `git lfs` client works out of the box — no special configuration needed.
+These endpoints implement the [Git LFS Batch API](https://github.com/git-lfs/git-lfs/blob/main/docs/api/batch.md) specification. They are called automatically by the `git lfs` client — you typically don't need to call them directly.
 
-LFS objects are stored in a dedicated Cloudflare R2 bucket with presigned URLs for direct upload/download. The CoreGit Worker never proxies file data.
+All LFS endpoints use `application/vnd.git-lfs+json` content type and Basic authentication (same credentials as `git push`).
 
-## Setup
-
-Track large files with `.gitattributes`:
-
-```bash
-git lfs track "*.psd"
-git lfs track "*.png"
-git lfs track "models/**"
-git add .gitattributes
-```
-
-Clone and push as usual:
-
-```bash
-git clone https://org-slug:API_KEY@api.coregit.dev/org/repo.git
-git lfs push --all origin main
-```
+For a usage guide with `git lfs` commands, see [Git LFS Guide](/docs/git-protocol/lfs).
 
 ## Batch API
 
-The Batch API is the core LFS endpoint. Git LFS clients call it automatically.
-
 ```http
 POST /:org/:repo.git/info/lfs/objects/batch
-Authorization: Basic {base64(orgSlug:apiKey)}
-Content-Type: application/vnd.git-lfs+json
-Accept: application/vnd.git-lfs+json
+POST /:org/:namespace/:repo.git/info/lfs/objects/batch
 ```
 
-### Upload Request
+**Auth:** Basic auth. Upload requires write access, download requires read access. Public repos allow unauthenticated download.
+
+### Request
 
 ```json
 {
   "operation": "upload",
   "transfers": ["basic"],
   "objects": [
-    { "oid": "abc123...64hex", "size": 52428800 }
-  ]
+    { "oid": "78579d983fa87c4f9c3f4f86a32b02ff312db25dd0ec1f5cb7853c28c19ed060", "size": 524288 }
+  ],
+  "ref": { "name": "refs/heads/main" }
 }
 ```
 
-### Upload Response
+| Field | Required | Description |
+|-------|----------|-------------|
+| `operation` | Yes | `"upload"` or `"download"` |
+| `transfers` | No | Transfer adapters (only `"basic"` supported) |
+| `objects` | Yes | Array of objects with `oid` (64-char hex SHA-256) and `size` (bytes) |
+| `ref` | No | Branch reference for authorization context |
+
+### Upload Response `200`
 
 ```json
 {
   "transfer": "basic",
   "objects": [
     {
-      "oid": "abc123...",
-      "size": 52428800,
+      "oid": "78579d...",
+      "size": 524288,
       "actions": {
         "upload": {
-          "href": "https://....r2.cloudflarestorage.com/coregit-lfs/...",
+          "href": "https://{account}.r2.cloudflarestorage.com/coregit-lfs/{orgId}/{repoId}/lfs/{oid}?X-Amz-Signature=...",
           "header": { "Content-Type": "application/octet-stream" },
           "expires_in": 900
         },
         "verify": {
-          "href": "https://api.coregit.dev/org/repo.git/info/lfs/verify",
+          "href": "https://api.coregit.dev/{org}/{repo}.git/info/lfs/verify",
+          "header": { "Authorization": "Basic ..." },
           "expires_in": 900
         }
       }
     }
-  ]
+  ],
+  "hash_algo": "sha256"
 }
 ```
 
-If the object already exists, `actions` is omitted (client skips upload).
+The client PUTs the file directly to the `upload.href` URL (presigned R2), then POSTs to `verify.href` to confirm.
 
-### Download Response
+**If the object already exists**, `actions` is omitted — the client skips the upload:
+
+```json
+{ "oid": "78579d...", "size": 524288 }
+```
+
+### Download Response `200`
 
 ```json
 {
   "transfer": "basic",
   "objects": [
     {
-      "oid": "abc123...",
-      "size": 52428800,
+      "oid": "78579d...",
+      "size": 524288,
       "actions": {
         "download": {
-          "href": "https://....r2.cloudflarestorage.com/coregit-lfs/...",
+          "href": "https://{account}.r2.cloudflarestorage.com/coregit-lfs/...?X-Amz-Signature=...",
           "expires_in": 3600
         }
       }
     }
-  ]
+  ],
+  "hash_algo": "sha256"
 }
 ```
 
-### Public Repos
+### Per-Object Errors
 
-Download operations work without authentication for public repositories, matching `git clone` behavior.
+Objects that fail validation are returned with an `error` instead of `actions`:
+
+```json
+{
+  "oid": "78579d...",
+  "size": 524288,
+  "error": { "code": 422, "message": "File too large. Max 100 MB for free tier." }
+}
+```
+
+| Code | Meaning |
+|------|---------|
+| 404 | Object not found (download only) |
+| 422 | Invalid oid, invalid size, or file too large |
+| 507 | Storage quota exceeded |
+
+### Request-Level Errors
+
+| Code | Meaning |
+|------|---------|
+| 400 | Invalid JSON or missing required fields |
+| 401 | Missing or invalid credentials |
+| 403 | Insufficient permissions (e.g. read-only token on upload) |
+| 404 | Repository not found |
+| 422 | Too many objects in batch (max 20 free, 100 usage) |
+| 500 | LFS storage not configured |
 
 ## Verify Callback
 
-After upload, the client calls the verify endpoint to confirm the object was stored:
-
 ```http
 POST /:org/:repo.git/info/lfs/verify
+POST /:org/:namespace/:repo.git/info/lfs/verify
 ```
+
+**Auth:** Basic auth (write access required).
+
+Called by the client after a successful upload. Confirms the object exists in R2 and the size matches.
 
 ```json
-{ "oid": "abc123...", "size": 52428800 }
+{ "oid": "78579d983fa87c4f9c3f4f86a32b02ff312db25dd0ec1f5cb7853c28c19ed060", "size": 524288 }
 ```
 
-The server checks R2 for the object and validates the size matches. Returns `200` on success.
+**Response** `200` (empty body) on success.
 
-## File Locking
+| Error | Meaning |
+|-------|---------|
+| 404 | Object not found in R2 (upload didn't complete) |
+| 422 | Size mismatch between claimed and actual |
 
-Prevent conflicts on binary files that can't be merged.
+On success, the object is recorded in the database and storage/transfer usage is tracked.
 
-### Create Lock
+## Create Lock
 
 ```http
 POST /:org/:repo.git/info/lfs/locks
+POST /:org/:namespace/:repo.git/info/lfs/locks
 ```
 
+**Auth:** Basic auth (write access required).
+
 ```json
-{ "path": "assets/logo.psd" }
+{
+  "path": "assets/logo.psd",
+  "ref": { "name": "refs/heads/main" }
+}
 ```
 
 **Response** `201`:
+
 ```json
 {
   "lock": {
-    "id": "lock_abc",
+    "id": "umoiA4_WhzEbgWoUKLaS4",
     "path": "assets/logo.psd",
-    "locked_at": "2026-04-06T12:00:00Z",
-    "owner": { "name": "key_xyz" }
+    "locked_at": "2026-04-06T12:00:00.000Z",
+    "owner": { "name": "VKi4S4wvJQmZP23FxV6s6" }
   }
 }
 ```
 
-Returns `409` if the file is already locked by another user.
+The `owner.name` is the API key ID that created the lock.
 
-### List Locks
+**`409`** if already locked:
 
-```http
-GET /:org/:repo.git/info/lfs/locks?path=assets/logo.psd
+```json
+{
+  "lock": { "id": "...", "path": "assets/logo.psd", "locked_at": "...", "owner": { "name": "..." } },
+  "message": "already created lock"
+}
 ```
 
-### Verify Locks
+## List Locks
+
+```http
+GET /:org/:repo.git/info/lfs/locks
+GET /:org/:namespace/:repo.git/info/lfs/locks
+```
+
+**Auth:** Basic auth (read access required).
+
+**Query parameters:**
+
+| Param | Description |
+|-------|-------------|
+| `path` | Filter by file path |
+| `id` | Filter by lock ID |
+| `limit` | Max results (1-100, default 100) |
+| `cursor` | Pagination cursor |
+
+**Response** `200`:
+
+```json
+{
+  "locks": [
+    {
+      "id": "umoiA4_WhzEbgWoUKLaS4",
+      "path": "assets/logo.psd",
+      "locked_at": "2026-04-06T12:00:00.000Z",
+      "owner": { "name": "VKi4S4wvJQmZP23FxV6s6" }
+    }
+  ],
+  "next_cursor": ""
+}
+```
+
+## Verify Locks
 
 ```http
 POST /:org/:repo.git/info/lfs/locks/verify
+POST /:org/:namespace/:repo.git/info/lfs/locks/verify
 ```
 
-Splits locks into `ours` (current user) and `theirs` (others). Git LFS blocks push if modified files are in `theirs`.
+**Auth:** Basic auth (write access required).
 
-### Unlock
+```json
+{
+  "ref": { "name": "refs/heads/main" },
+  "limit": 100
+}
+```
+
+**Response** `200`:
+
+```json
+{
+  "ours": [
+    { "id": "...", "path": "assets/logo.psd", "locked_at": "...", "owner": { "name": "..." } }
+  ],
+  "theirs": [
+    { "id": "...", "path": "data/model.bin", "locked_at": "...", "owner": { "name": "..." } }
+  ],
+  "next_cursor": ""
+}
+```
+
+`ours` = locks owned by the current API key. `theirs` = locks owned by others. Git LFS blocks push if modified files appear in `theirs`.
+
+## Unlock
 
 ```http
 POST /:org/:repo.git/info/lfs/locks/:id/unlock
+POST /:org/:namespace/:repo.git/info/lfs/locks/:id/unlock
 ```
+
+**Auth:** Basic auth (write access required).
 
 ```json
 { "force": false }
 ```
 
-Set `force: true` with a master API key to unlock files locked by other users.
+| Field | Description |
+|-------|-------------|
+| `force` | Set `true` to delete another user's lock. Requires master API key. |
+
+**Response** `200`:
+
+```json
+{
+  "lock": { "id": "...", "path": "assets/logo.psd", "locked_at": "...", "owner": { "name": "..." } }
+}
+```
+
+**`403`** if trying to unlock another user's lock without `force: true` or without master key.
 
 ## Limits
 
@@ -177,26 +290,11 @@ Set `force: true` with a master API key to unlock files locked by other users.
 | Usage | 2 GB | 100 |
 | Enterprise | Custom | Custom |
 
-LFS storage and transfer count toward your org's existing storage and transfer quotas. No separate LFS billing.
+LFS storage and transfer count toward existing org quotas. No separate LFS billing.
 
-## SDK Examples
+## Presigned URL Details
 
-```typescript
-// List LFS locks
-const { data } = await git.lfs.listLocks("my-repo");
-console.log(data.locks);
-
-// Lock a file before editing
-await git.lfs.createLock("my-repo", "assets/logo.psd");
-
-// Verify which locks are yours vs others'
-const { data: verify } = await git.lfs.verifyLocks("my-repo");
-console.log("Mine:", verify.ours);
-console.log("Theirs:", verify.theirs);
-
-// Unlock when done
-await git.lfs.unlock("my-repo", "lock_abc");
-
-// Force unlock (master key only)
-await git.lfs.unlock("my-repo", "lock_abc", { force: true });
-```
+- **Upload URLs** expire in **15 minutes** (900 seconds)
+- **Download URLs** expire in **1 hour** (3600 seconds)
+- URLs point directly to Cloudflare R2 — the CoreGit Worker is not in the data path
+- Each URL is signed for a specific object key and cannot be reused for other objects

@@ -1,0 +1,207 @@
+---
+title: Git LFS
+description: Store and manage large files with Git LFS on CoreGit.
+---
+
+## Overview
+
+CoreGit fully supports the [Git LFS](https://git-lfs.com/) protocol. Large files (images, models, datasets, binaries) are stored in dedicated object storage and replaced with lightweight pointer files in your git history.
+
+The standard `git lfs` client works out of the box — no special configuration or `.lfsconfig` needed.
+
+## How It Works
+
+```
+git lfs push                         git lfs pull
+     │                                    │
+     ▼                                    ▼
+┌─────────────────────┐        ┌─────────────────────┐
+│ CoreGit Batch API   │        │ CoreGit Batch API   │
+│ (returns signed URL)│        │ (returns signed URL)│
+└────────┬────────────┘        └────────┬────────────┘
+         │ presigned PUT URL            │ presigned GET URL
+         ▼                              ▼
+┌─────────────────────┐        ┌─────────────────────┐
+│ Cloudflare R2       │        │ Cloudflare R2       │
+│ (direct upload)     │        │ (direct download)   │
+└─────────────────────┘        └─────────────────────┘
+```
+
+Your files upload/download **directly to storage** — the CoreGit API server only handles authentication and URL signing, never the file data itself. This means no size bottleneck on the server.
+
+## Quick Start
+
+### 1. Install Git LFS
+
+```bash
+# macOS
+brew install git-lfs
+
+# Ubuntu/Debian
+sudo apt install git-lfs
+
+# Then initialize (once per machine)
+git lfs install
+```
+
+### 2. Clone Your Repo
+
+```bash
+git clone https://org-slug:YOUR_API_KEY@api.coregit.dev/org-slug/my-repo.git
+cd my-repo
+```
+
+### 3. Track File Patterns
+
+```bash
+# Track all .psd files
+git lfs track "*.psd"
+
+# Track all files in a directory
+git lfs track "models/**"
+
+# Track specific large file types
+git lfs track "*.bin" "*.tar.gz" "*.zip" "*.mp4"
+
+# Always commit .gitattributes
+git add .gitattributes
+```
+
+### 4. Add, Commit, Push
+
+```bash
+# Add a large file
+cp ~/my-model.bin .
+git add my-model.bin
+git commit -m "add trained model"
+git push origin main
+```
+
+Git LFS automatically:
+1. Replaces `my-model.bin` with a pointer file in the commit
+2. Calls the CoreGit Batch API to get an upload URL
+3. Uploads the file directly to R2
+4. Calls the verify endpoint to confirm
+5. Pushes the pointer file via normal git push
+
+### 5. Pull / Clone with LFS
+
+```bash
+# Clone includes LFS files automatically
+git clone https://org:KEY@api.coregit.dev/org/repo.git
+
+# Or pull LFS files separately
+git lfs pull
+```
+
+## Namespaced Repositories
+
+LFS works the same with namespaced repos:
+
+```bash
+git clone https://org:KEY@api.coregit.dev/org/namespace/repo.git
+```
+
+The LFS server URL is automatically derived as:
+```
+https://api.coregit.dev/org/namespace/repo.git/info/lfs
+```
+
+## File Locking
+
+Binary files (images, models, compiled assets) can't be merged. Use LFS file locking to prevent conflicts:
+
+```bash
+# Enable lock verification
+git config lfs.https://org:KEY@api.coregit.dev/org/repo.git/info/lfs.locksverify true
+
+# Lock a file before editing
+git lfs lock assets/logo.psd
+
+# See who has what locked
+git lfs locks
+
+# Unlock when done
+git lfs unlock assets/logo.psd
+
+# Force unlock someone else's lock (requires master API key)
+git lfs unlock assets/logo.psd --force
+```
+
+When lock verification is enabled, `git push` will fail if you modified a file locked by someone else.
+
+## Scoped Tokens
+
+LFS respects the same scoped token permissions as git push/pull:
+
+```bash
+# Read-only token — can pull LFS files, cannot push
+git clone https://org:cgt_READ_TOKEN@api.coregit.dev/org/repo.git
+
+# Read-write token — full LFS access
+git clone https://org:cgt_WRITE_TOKEN@api.coregit.dev/org/repo.git
+```
+
+## Public Repositories
+
+Public repos allow LFS download without authentication:
+
+```bash
+# No credentials needed for public repos
+git clone https://api.coregit.dev/org/public-repo.git
+# LFS files download automatically
+```
+
+Upload always requires authentication.
+
+## Recommended `.gitattributes`
+
+```
+# Images
+*.png filter=lfs diff=lfs merge=lfs -text
+*.jpg filter=lfs diff=lfs merge=lfs -text
+*.gif filter=lfs diff=lfs merge=lfs -text
+*.psd filter=lfs diff=lfs merge=lfs -text
+*.svg filter=lfs diff=lfs merge=lfs -text
+
+# Models & Data
+*.bin filter=lfs diff=lfs merge=lfs -text
+*.pkl filter=lfs diff=lfs merge=lfs -text
+*.h5 filter=lfs diff=lfs merge=lfs -text
+*.onnx filter=lfs diff=lfs merge=lfs -text
+*.safetensors filter=lfs diff=lfs merge=lfs -text
+
+# Archives
+*.zip filter=lfs diff=lfs merge=lfs -text
+*.tar.gz filter=lfs diff=lfs merge=lfs -text
+
+# Video/Audio
+*.mp4 filter=lfs diff=lfs merge=lfs -text
+*.mp3 filter=lfs diff=lfs merge=lfs -text
+```
+
+## Limits
+
+| Tier | Max File Size | Objects per Batch |
+|------|---------------|-------------------|
+| Free | 100 MB | 20 |
+| Usage | 2 GB | 100 |
+| Enterprise | Custom | Custom |
+
+LFS storage and transfer count toward your organization's existing quotas — no separate LFS billing. See [Usage](/docs/api-reference/usage) for current quota details.
+
+## Migrating from GitHub LFS
+
+```bash
+# Clone from GitHub with LFS
+git clone https://github.com/org/repo.git
+cd repo
+git lfs fetch --all
+
+# Add CoreGit as remote
+git remote add coregit https://org:KEY@api.coregit.dev/org/repo.git
+
+# Push everything including LFS objects
+git push coregit main
+git lfs push --all coregit
+```

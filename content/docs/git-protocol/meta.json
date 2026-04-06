@@ -1,4 +1,4 @@
 {
   "title": "Git Protocol",
-  "pages": ["index", "clone-fetch", "push"]
+  "pages": ["index", "clone-fetch", "push", "lfs"]
 }

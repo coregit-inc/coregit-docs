@@ -30,3 +30,13 @@ The Git protocol uses two endpoints under the hood:
 - `POST /:org/:repo.git/git-upload-pack` — Pack data transfer (clone/fetch)
 - `GET /:org/:repo.git/info/refs?service=git-receive-pack` — Ref advertisement (push)
 - `POST /:org/:repo.git/git-receive-pack` — Pack data transfer (push)
+
+## Git LFS
+
+CoreGit supports [Git LFS](/docs/git-protocol/lfs) for large file storage. LFS endpoints:
+
+- `POST /:org/:repo.git/info/lfs/objects/batch` — Batch upload/download
+- `POST /:org/:repo.git/info/lfs/verify` — Upload verification
+- `POST/GET /:org/:repo.git/info/lfs/locks` — File locking
+
+Files are stored in Cloudflare R2 via presigned URLs — the server never proxies file data. See the [LFS guide](/docs/git-protocol/lfs) for setup and usage.
