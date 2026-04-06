@@ -171,6 +171,8 @@ You can search code as it existed at any indexed commit:
 
 This returns results matching the state of the codebase at that specific commit, not the current branch HEAD. Vectors are content-addressed — no re-indexing needed.
 
+**Important:** searching by commit SHA works for any commit whose files have been indexed. Once a branch is indexed, all commits in its history become searchable — old blob vectors are never deleted. However, if a file existed only in a commit *before* the first indexing and has since been completely rewritten, the old version's vectors won't be in the index. In that case, results for that commit will be partial (only files whose content was seen during any indexing run).
+
 ## Delete Index
 
 ```http
