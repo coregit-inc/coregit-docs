@@ -1,18 +1,29 @@
 ---
 title: TypeScript SDK
-description: Install and use the official @strayl/coregit SDK for typed access to the Coregit API.
+description: Install and use the official @coregit/sdk package for typed access to the Coregit API.
 ---
 
 ## Installation
 
 ```bash
-npm install @strayl/coregit
+npm install @coregit/sdk
 ```
+
+<Callout type="info">
+**Migrating from `@strayl/coregit`?** The package has been renamed to `@coregit/sdk`. The API is identical — just update the package name in your `package.json` and imports:
+
+```bash
+npm uninstall @strayl/coregit
+npm install @coregit/sdk
+```
+
+Then find-and-replace `@strayl/coregit` → `@coregit/sdk` in your imports. `@strayl/coregit` is now legacy and will not receive updates.
+</Callout>
 
 ## Quick Start
 
 ```typescript
-import { createCoregitClient } from "@strayl/coregit";
+import { createCoregitClient } from "@coregit/sdk";
 
 const git = createCoregitClient({
   apiKey: process.env.COREGIT_API_KEY!,
@@ -553,7 +564,7 @@ for (const event of data.events) {
 ## Full Example: AI Agent Workflow
 
 ```typescript
-import { createCoregitClient } from "@strayl/coregit";
+import { createCoregitClient } from "@coregit/sdk";
 
 const git = createCoregitClient({ apiKey: process.env.COREGIT_API_KEY! });
 
