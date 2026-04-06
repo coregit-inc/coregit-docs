@@ -1,11 +1,11 @@
 ---
 title: Git LFS
-description: Store and manage large files with Git LFS on CoreGit.
+description: Store and manage large files with Git LFS on Coregit.
 ---
 
 ## Overview
 
-CoreGit fully supports the [Git LFS](https://git-lfs.com/) protocol. Large files (images, models, datasets, binaries) are stored in dedicated object storage and replaced with lightweight pointer files in your git history.
+Coregit fully supports the [Git LFS](https://git-lfs.com/) protocol. Large files (images, models, datasets, binaries) are stored in dedicated object storage and replaced with lightweight pointer files in your git history.
 
 The standard `git lfs` client works out of the box — no special configuration or `.lfsconfig` needed.
 
@@ -16,7 +16,7 @@ git lfs push                         git lfs pull
      │                                    │
      ▼                                    ▼
 ┌─────────────────────┐        ┌─────────────────────┐
-│ CoreGit Batch API   │        │ CoreGit Batch API   │
+│ Coregit Batch API   │        │ Coregit Batch API   │
 │ (returns signed URL)│        │ (returns signed URL)│
 └────────┬────────────┘        └────────┬────────────┘
          │ presigned PUT URL            │ presigned GET URL
@@ -27,7 +27,7 @@ git lfs push                         git lfs pull
 └─────────────────────┘        └─────────────────────┘
 ```
 
-Your files upload/download **directly to storage** — the CoreGit API server only handles authentication and URL signing, never the file data itself. This means no size bottleneck on the server.
+Your files upload/download **directly to storage** — the Coregit API server only handles authentication and URL signing, never the file data itself. This means no size bottleneck on the server.
 
 ## Quick Start
 
@@ -79,7 +79,7 @@ git push origin main
 
 Git LFS automatically:
 1. Replaces `my-model.bin` with a pointer file in the commit
-2. Calls the CoreGit Batch API to get an upload URL
+2. Calls the Coregit Batch API to get an upload URL
 3. Uploads the file directly to R2
 4. Calls the verify endpoint to confirm
 5. Pushes the pointer file via normal git push
@@ -198,7 +198,7 @@ git clone https://github.com/org/repo.git
 cd repo
 git lfs fetch --all
 
-# Add CoreGit as remote
+# Add Coregit as remote
 git remote add coregit https://org:KEY@api.coregit.dev/org/repo.git
 
 # Push everything including LFS objects
