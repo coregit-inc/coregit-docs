@@ -42,9 +42,70 @@ Each entry in `changes` describes a file operation.
 | Field | Required | Description |
 |-------|----------|-------------|
 | `path` | Yes | File path (no traversal) |
-| `content` | No | File content (required unless deleting) |
+| `content` | No | Full file content (for create/modify) |
 | `encoding` | No | `utf-8` (default) or `base64` |
-| `action` | No | Set to `"delete"` to remove a file. Omit for create/modify operations |
+| `action` | No | `"create"` (default), `"edit"`, `"delete"`, or `"rename"` |
+| `edits` | No | Array of surgical edits (required when `action: "edit"`) |
+| `new_path` | No | New file path (required when `action: "rename"`) |
+
+### Surgical Edits
+
+When `action: "edit"`, you can make precise changes without sending the entire file. Two modes are supported:
+
+**String replacement** (like search-and-replace):
+
+```json
+{
+  "path": "src/config.ts",
+  "action": "edit",
+  "edits": [
+    {
+      "old_string": "const API_URL = \"http://localhost:3000\"",
+      "new_string": "const API_URL = \"https://api.coregit.dev\""
+    }
+  ]
+}
+```
+
+`old_string` must match exactly one location in the file. Include enough surrounding context to ensure uniqueness. Omit `new_string` to delete the matched text.
+
+**Line range replacement**:
+
+```json
+{
+  "path": "src/auth.ts",
+  "action": "edit",
+  "edits": [
+    {
+      "range": [15, 20],
+      "content": "  const token = verifyJWT(req.headers.authorization);\n  if (!token) throw new UnauthorizedError();"
+    }
+  ]
+}
+```
+
+`range` is `[startLine, endLine]` (1-based, inclusive). Lines in the range are replaced with `content`.
+
+**Both modes in one commit**:
+
+```json
+{
+  "changes": [
+    { "path": "README.md", "content": "# My App", "action": "create" },
+    {
+      "path": "src/config.ts",
+      "action": "edit",
+      "edits": [
+        { "old_string": "localhost:3000", "new_string": "api.coregit.dev" }
+      ]
+    },
+    { "path": "src/old.ts", "action": "delete" },
+    { "path": "src/utils.ts", "action": "rename", "new_path": "src/lib/utils.ts" }
+  ]
+}
+```
+
+String edits are applied first, then range edits (bottom-to-top to preserve line numbers). Returns `422` if `old_string` is not found or matches multiple locations.
 
 ### Fields
 
