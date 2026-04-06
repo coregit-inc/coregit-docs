@@ -31,7 +31,7 @@ POST /v1/repos/:slug/index
 
 ```json
 {
-  "branch": "main"
+  "ref": "main"
 }
 ```
 
@@ -45,7 +45,7 @@ POST /v1/repos/:slug/index
 {
   "message": "Reindex queued",
   "repo_slug": "my-app",
-  "branch": "main"
+  "ref": "main"
 }
 ```
 
@@ -96,7 +96,7 @@ POST /v1/repos/:slug/semantic-search
 ```json
 {
   "q": "user authentication with password verification",
-  "branch": "main",
+  "ref": "main",
   "language": "typescript",
   "top_k": 10
 }
@@ -107,7 +107,7 @@ POST /v1/repos/:slug/semantic-search
 | Field | Required | Description |
 |-------|----------|-------------|
 | `q` | Yes | Natural language search query (max 1000 chars) |
-| `branch` | No | Branch to search (default: repo's default branch) |
+| `ref` | No | Branch name or commit SHA (default: repo's default branch) |
 | `path_pattern` | No | Glob filter on file paths (e.g., `"src/*.ts"`) |
 | `language` | No | Filter by programming language (e.g., `"typescript"`, `"python"`) |
 | `top_k` | No | Number of results to return (default: 10, max: 50) |
@@ -136,7 +136,7 @@ POST /v1/repos/:slug/semantic-search
   ],
   "query": "user authentication with password verification",
   "repo_slug": "my-app",
-  "branch": "main"
+  "ref": "main"
 }
 ```
 
@@ -154,9 +154,22 @@ POST /v1/repos/:slug/semantic-search
 
 | Status | Description |
 |--------|-------------|
-| `404` | Branch is not indexed. Call `POST /index` first. |
+| `404` | Ref not found, or no blobs indexed for this version. |
 | `202` | Indexing is in progress. Retry after it completes. |
 | `503` | Semantic search is not configured on the server. |
+
+### Search by Commit SHA
+
+You can search code as it existed at any indexed commit:
+
+```json
+{
+  "q": "database connection pooling",
+  "ref": "8b7d3153212bdb9affd9a969cbdb2c17608aab87"
+}
+```
+
+This returns results matching the state of the codebase at that specific commit, not the current branch HEAD. Vectors are content-addressed — no re-indexing needed.
 
 ## Delete Index
 
@@ -166,9 +179,13 @@ DELETE /v1/repos/:slug/index
 
 **Permission:** Write access required.
 
+With no body: deletes **all vectors** for the repo and all DB tracking records.
+
+With `branch` in body: deletes only the DB tracking record (vectors are shared and remain).
+
 ```json
 {
-  "branch": "main"
+  "branch": "feature-x"
 }
 ```
 
@@ -177,7 +194,7 @@ DELETE /v1/repos/:slug/index
 ```json
 {
   "deleted": true,
-  "branch": "main"
+  "vectors_deleted": true
 }
 ```
 
@@ -192,7 +209,7 @@ Set `auto_index: true` when creating a repository to automatically index new com
 }
 ```
 
-When enabled, every commit triggers incremental indexing — only changed files are re-embedded.
+When enabled, every commit triggers incremental indexing — only changed files are re-embedded. Vectors are content-addressed by blob SHA, so identical content across branches/commits is never duplicated.
 
 ## SDK Examples
 
@@ -210,9 +227,10 @@ do {
   if (status === "indexing") await new Promise(r => setTimeout(r, 2000));
 } while (status === "indexing");
 
-// 3. Semantic search
+// 3. Search current branch
 const { data } = await git.search.semantic("my-app", {
   q: "function that handles user login and session creation",
+  ref: "main",
   top_k: 5,
 });
 
@@ -221,9 +239,16 @@ for (const result of data.results) {
   console.log(`  Lines ${result.start_line}-${result.end_line}`);
 }
 
-// Filter by language
+// 4. Search at a specific commit (version-aware)
+const { data: oldVersion } = await git.search.semantic("my-app", {
+  q: "authentication middleware",
+  ref: "8b7d3153212bdb9affd9a969cbdb2c17608aab87",
+});
+
+// 5. Filter by language and path
 const { data: tsResults } = await git.search.semantic("my-app", {
   q: "database connection pooling",
+  ref: "feature-branch",
   language: "typescript",
   path_pattern: "src/**/*.ts",
 });
