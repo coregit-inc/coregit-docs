@@ -3,15 +3,21 @@ title: Semantic Search
 description: AI-powered code search using natural language queries.
 ---
 
-Search code by intent, not just keywords. Semantic search uses AI embeddings to find relevant code even when the exact terms don't appear in the file. Powered by Voyage AI code embeddings and reranking.
+Search code by intent, not just keywords. Semantic search uses AI embeddings to find relevant code even when the exact terms don't appear in the file.
 
 ## How It Works
 
-1. **Index** your repository — code is chunked, embedded, and stored in a vector database
-2. **Search** with natural language — your query is embedded and matched against code vectors
-3. **Rerank** — top candidates are reranked by a cross-attention model for precision
+1. **Index** your repository — code is chunked and embedded into vectors using [Voyage AI](https://voyageai.com) `voyage-code-3` (optimized for 300+ programming languages)
+2. **Search** with natural language — your query is embedded and matched against code vectors in [Pinecone](https://pinecone.io) (serverless vector database, 1024-dimensional cosine similarity)
+3. **Rerank** — top 50 candidates are reranked by Voyage AI `rerank-2.5` (cross-attention model with instruction-following) for precision
 
-Text is never stored in the vector database. Code is fetched from Git storage on the fly for reranking.
+| Component | Provider | Model |
+|-----------|----------|-------|
+| Code embeddings | Voyage AI | `voyage-code-3` (1024D, 32K context) |
+| Vector storage | Pinecone | Serverless (cosine, AWS us-east-1) |
+| Reranking | Voyage AI | `rerank-2.5` (32K context) |
+
+Code text is never stored in the vector database — only vectors and lightweight metadata. Snippets are fetched from Git storage on the fly for reranking and response.
 
 ## Index a Repository
 
