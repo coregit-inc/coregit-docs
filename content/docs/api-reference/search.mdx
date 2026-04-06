@@ -21,7 +21,7 @@ POST /v1/search
   "case_sensitive": false,
   "context_lines": 2,
   "max_results": 100,
-  "branch": "main",
+  "ref": "main",
   "path_pattern": "src/*.ts"
 }
 ```
@@ -36,7 +36,7 @@ POST /v1/search
 | `case_sensitive` | No | Case-sensitive matching (default: `false`) |
 | `context_lines` | No | Lines of context around each match (default: 2, max: 10) |
 | `max_results` | No | Max matches to return (default: 100, max: 500) |
-| `branch` | No | Branch to search in each repo (default: repo's default branch) |
+| `ref` | No | Branch name or commit SHA to search (default: repo's default branch) |
 | `path_pattern` | No | Glob-like filter on file paths (e.g., `"src/*.ts"`) |
 
 ### Response `200`
