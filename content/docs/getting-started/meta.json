@@ -1,4 +1,4 @@
 {
   "title": "Getting Started",
-  "pages": ["index", "authentication", "typescript-sdk"]
+  "pages": ["index", "authentication", "typescript-sdk", "agent-onboarding"]
 }

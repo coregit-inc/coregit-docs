@@ -1,0 +1,117 @@
+---
+title: Agent Onboarding
+description: Set up Coregit from any AI coding agent — no browser needed. Sign up, verify, and get an API key in 2 API calls.
+---
+
+## Overview
+
+AI coding agents (Claude Code, Cursor, Codex, etc.) can sign up for Coregit, verify their email, and get an API key entirely from the terminal. No browser, no dashboard, no manual steps.
+
+## Quick Start
+
+Copy this prompt and send it to your coding agent:
+
+```
+Set up Coregit for this project. Run npx coregit-wizard@latest to install
+the CLI and skill. Then sign me up — ask for my email, call the signup API
+at https://app.coregit.dev/api/auth/agent/signup, ask me for the 6-digit
+code from my email, verify it at https://app.coregit.dev/api/auth/agent/verify,
+and store the API key with cgt auth login --api-key. After setup, show me
+a summary with my email, org, and API key.
+```
+
+## How It Works
+
+### Step 1: Send verification code
+
+```bash
+curl -s -X POST https://app.coregit.dev/api/auth/agent/signup \
+  -H "Content-Type: application/json" \
+  -d '{"email": "you@example.com", "name": "Your Name"}'
+```
+
+Response:
+```json
+{"ok": true, "message": "Verification code sent to you@example.com"}
+```
+
+A 6-digit code is sent to the email. The code expires in 10 minutes.
+
+### Step 2: Verify and get API key
+
+```bash
+curl -s -X POST https://app.coregit.dev/api/auth/agent/verify \
+  -H "Content-Type: application/json" \
+  -d '{"email": "you@example.com", "code": "123456"}'
+```
+
+Response:
+```json
+{
+  "ok": true,
+  "api_key": "cgk_live_...",
+  "org": {"id": "...", "name": "...", "slug": "..."},
+  "user": {"id": "...", "email": "..."},
+  "api_base_url": "https://api.coregit.dev"
+}
+```
+
+This automatically creates the user account, organization, and API key. If the user already has an account, it creates a new API key for their existing organization.
+
+### Step 3: Store credentials
+
+```bash
+cgt auth login --api-key cgk_live_...
+```
+
+Or set the environment variable:
+```bash
+export COREGIT_API_KEY=cgk_live_...
+```
+
+Credentials are stored at `~/.config/coregit/credentials.json`.
+
+## Wizard
+
+The wizard automates the full setup — installs the skill for all detected AI agents, installs the CLI, and runs the auth flow:
+
+```bash
+npx coregit-wizard@latest
+```
+
+## Skill
+
+Install the Coregit skill so agents know how to use the API:
+
+```bash
+npx skills add Strayl-Inc/skills
+```
+
+This installs the skill for all detected agents (Claude Code, Cursor, Codex, Gemini CLI, and 40+ more).
+
+## CLI Reference
+
+| Command | Description |
+|---------|-------------|
+| `cgt auth login` | Interactive OTP signup/login |
+| `cgt auth login --api-key <key>` | Store an existing API key |
+| `cgt auth status` | Show current authentication |
+| `cgt auth logout` | Remove stored credentials |
+| `cgt agent-guide` | Print onboarding instructions for agents |
+
+## API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/auth/agent/signup` | POST | Send 6-digit OTP to email |
+| `/api/auth/agent/verify` | POST | Verify OTP, create account + API key |
+
+Both endpoints accept `Content-Type: application/json` and return JSON. CORS is enabled for CLI usage.
+
+## Credential Priority
+
+The CLI and SDK resolve API keys in this order:
+
+1. `--api-key` flag (CLI only)
+2. `COREGIT_API_KEY` environment variable
+3. `~/.config/coregit/credentials.json` file
