@@ -153,17 +153,26 @@ const { data: commit } = await git.commits.create("my-repo", {
   message: "feat: add authentication",
   author: { name: "AI Agent", email: "agent@example.com" },
   changes: [
-    // Create a new file
-    { path: "src/auth.ts", content: "export function login() { ... }", action: "create" },
+    // Create or overwrite a file (default action)
+    { path: "src/auth.ts", content: "export function login() { ... }" },
 
-    // Modify an existing file
-    { path: "src/config.ts", content: updatedConfig, action: "modify" },
+    // Surgical edit — replace exact string match
+    {
+      path: "src/config.ts",
+      action: "edit",
+      edits: [
+        { old_string: 'const API_URL = "localhost"', new_string: 'const API_URL = "https://api.example.com"' }
+      ],
+    },
 
     // Binary file (base64)
     { path: "logo.png", content: base64Data, encoding: "base64" },
 
     // Delete a file
     { path: "old-config.json", action: "delete" },
+
+    // Rename a file
+    { path: "src/utils.ts", action: "rename", new_path: "src/lib/utils.ts" },
   ],
 });
 
@@ -350,10 +359,13 @@ const { data, error } = await git.cherryPick.execute("my-repo", {
 Low-level ref management with atomic compare-and-swap.
 
 ```typescript
-// List all refs
+// List all refs (branches + tags)
 const { data } = await git.refs.list("my-repo");
-for (const ref of data.refs) {
-  console.log(ref.ref, ref.sha); // "refs/heads/main" "7f3b..."
+for (const branch of data.branches) {
+  console.log(branch.name, branch.sha); // "main" "7f3b..."
+}
+for (const tag of data.tags) {
+  console.log(tag.name, tag.sha); // "v1.0" "a1c2..."
 }
 
 // Get single ref
@@ -482,23 +494,70 @@ const { data } = await git.search.query({
 });
 ```
 
+## Connections
+
+Manage GitHub and GitLab access tokens for sync.
+
+```typescript
+// Create a GitHub connection
+const { data: conn } = await git.connections.create({
+  provider: "github",
+  label: "CI Token",
+  access_token: "ghp_xxxxxxxxxxxx",
+});
+console.log(conn.external_username); // "octocat"
+
+// List all connections
+const { data } = await git.connections.list();
+
+// Test if a token is still valid
+const { data: test } = await git.connections.test(conn.id);
+console.log(test.valid); // true or false
+
+// Rotate a token
+await git.connections.update(conn.id, { access_token: "ghp_new_token" });
+
+// Delete
+await git.connections.delete(conn.id);
+```
+
 ## Sync
 
 Synchronize repositories from GitHub or GitLab.
 
 ```typescript
+// Create sync config (import from GitHub)
+const { data: config } = await git.sync.createConfig("my-repo", {
+  connection_id: conn.id,
+  remote: "octocat/my-repo",
+  direction: "import",
+  auto_sync: true,
+});
+
+// Trigger sync manually
 const { data } = await git.sync.trigger("my-repo", {
-  sync_id: "sync_abc123",
-  branch: "main",
+  sync_id: config.id,
 });
 
 if (data.synced) {
   console.log(`Synced ${data.files_changed} files`);
-  console.log(`Deleted ${data.deleted} files`);
   console.log(`Commit: ${data.commit_sha}`);
-} else {
-  console.log("Already up to date");
 }
+
+// Get sync config
+const { data: current } = await git.sync.getConfig("my-repo");
+
+// Update config (switch to export)
+await git.sync.updateConfig("my-repo", { direction: "export" });
+
+// View sync history
+const { data: history } = await git.sync.history("my-repo", { limit: 10 });
+for (const run of history.runs) {
+  console.log(run.status, run.message);
+}
+
+// Delete sync config
+await git.sync.deleteConfig("my-repo");
 ```
 
 ## Tokens
@@ -560,6 +619,63 @@ for (const event of data.events) {
   console.log(event.event_type, event.quantity);
 }
 ```
+
+## Audit
+
+View an immutable log of all security-relevant actions.
+
+```typescript
+// List recent events
+const { data } = await git.audit.list({ limit: 20 });
+for (const event of data.events) {
+  console.log(event.action, event.resource_type, event.resource_id);
+}
+
+// Filter by action and time range
+const { data } = await git.audit.list({
+  action: "repo.create",
+  since: "2026-04-01T00:00:00Z",
+  limit: 50,
+});
+
+// Paginate
+if (data.next_cursor) {
+  const { data: page2 } = await git.audit.list({ cursor: data.next_cursor });
+}
+```
+
+## LFS
+
+Manage Git LFS objects and file locks via the REST API.
+
+```typescript
+// List LFS objects in a repo
+const { data } = await git.lfs.listObjects("my-repo");
+for (const obj of data.objects) {
+  console.log(obj.oid, obj.size);
+}
+
+// List file locks
+const { data } = await git.lfs.listLocks("my-repo");
+
+// Lock a file before editing
+await git.lfs.createLock("my-repo", "assets/logo.psd");
+
+// Verify which locks are yours vs others'
+const { data: verify } = await git.lfs.verifyLocks("my-repo");
+console.log("Mine:", verify.ours);
+console.log("Theirs:", verify.theirs);
+
+// Unlock when done
+await git.lfs.unlock("my-repo", "lock_abc");
+
+// Force unlock (master key only)
+await git.lfs.unlock("my-repo", "lock_abc", { force: true });
+```
+
+<Callout type="info">
+LFS file upload/download happens automatically via `git lfs push` / `git lfs pull`. The SDK provides access to metadata and locking — not the file transfer itself. See the [LFS Guide](/docs/git-protocol/lfs) for git command usage.
+</Callout>
 
 ## Full Example: AI Agent Workflow
 
