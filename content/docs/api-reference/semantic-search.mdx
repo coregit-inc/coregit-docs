@@ -9,7 +9,8 @@ Search code by intent, not just keywords. Semantic search uses AI embeddings to 
 
 1. **Index** your repository — code is chunked and embedded into vectors using [Voyage AI](https://voyageai.com) `voyage-code-3` (optimized for 300+ programming languages)
 2. **Search** with natural language — your query is embedded and matched against code vectors in [Pinecone](https://pinecone.io) (serverless vector database, 1024-dimensional cosine similarity)
-3. **Rerank** — top 50 candidates are reranked by Voyage AI `rerank-2.5` (cross-attention model with instruction-following) for precision
+3. **Rerank** — top candidates are reranked by Voyage AI `rerank-2.5` (cross-attention model with instruction-following) for precision
+4. **Diversify** — results are diversified across files using MMR (Maximal Marginal Relevance) so you don't get 10 results from the same file
 
 | Component | Provider | Model |
 |-----------|----------|-------|
@@ -18,6 +19,8 @@ Search code by intent, not just keywords. Semantic search uses AI embeddings to 
 | Reranking | Voyage AI | `rerank-2.5` (32K context) |
 
 Code text is never stored in the vector database — only vectors and lightweight metadata. Snippets are fetched from Git storage on the fly for reranking and response.
+
+**Performance:** Search results are cached in Cloudflare KV keyed by commit SHA + query. Repeated queries return instantly from cache (`X-Cache: HIT`). Cache auto-invalidates when new commits are pushed — the commit SHA in the cache key guarantees correctness.
 
 ## Index a Repository
 
@@ -98,7 +101,8 @@ POST /v1/repos/:slug/semantic-search
   "q": "user authentication with password verification",
   "ref": "main",
   "language": "typescript",
-  "top_k": 10
+  "top_k": 10,
+  "expand_context": false
 }
 ```
 
@@ -111,6 +115,7 @@ POST /v1/repos/:slug/semantic-search
 | `path_pattern` | No | Glob filter on file paths (e.g., `"src/*.ts"`) |
 | `language` | No | Filter by programming language (e.g., `"typescript"`, `"python"`) |
 | `top_k` | No | Number of results to return (default: 10, max: 50) |
+| `expand_context` | No | When `true`, include ~20 lines of surrounding code before/after each snippet |
 
 ### Response `200`
 
@@ -140,15 +145,27 @@ POST /v1/repos/:slug/semantic-search
 }
 ```
 
+**Response headers:**
+
+| Header | Description |
+|--------|-------------|
+| `X-Cache` | `HIT` if results came from cache, `MISS` if computed fresh |
+
+Results are automatically diversified across files — if multiple chunks match from the same file, later results are penalized to surface matches from different files first.
+
+**Result fields:**
+
 | Field | Description |
 |-------|-------------|
-| `results` | Array of matching code chunks, sorted by relevance |
+| `results` | Array of matching code chunks, sorted by relevance and diversified across files |
 | `results[].file_path` | Path to the file in the repository |
 | `results[].score` | Relevance score from 0 to 1 (higher is better) |
 | `results[].language` | Detected programming language |
 | `results[].start_line` | Start line of the matched chunk |
 | `results[].end_line` | End line of the matched chunk |
 | `results[].snippet` | The actual code content |
+| `results[].context_before` | *(only with `expand_context: true`)* ~20 lines of code before the snippet |
+| `results[].context_after` | *(only with `expand_context: true`)* ~20 lines of code after the snippet |
 
 ### Error Responses
 
@@ -258,4 +275,18 @@ const { data: tsResults } = await git.search.semantic("my-app", {
   language: "typescript",
   path_pattern: "src/**/*.ts",
 });
+
+// 6. Expand context around matches
+const { data: withContext } = await git.search.semantic("my-app", {
+  q: "error handling middleware",
+  ref: "main",
+  top_k: 5,
+  expand_context: true,
+});
+
+for (const result of withContext.results) {
+  if (result.context_before) console.log("--- before ---\n", result.context_before);
+  console.log("--- match ---\n", result.snippet);
+  if (result.context_after) console.log("--- after ---\n", result.context_after);
+}
 ```
