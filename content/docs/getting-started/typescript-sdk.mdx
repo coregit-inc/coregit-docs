@@ -93,7 +93,7 @@ await git.commits.list("my-repo");
 await git.commits.list({ namespace: "alice", slug: "my-repo" });
 ```
 
-This works across all clients: `repos`, `branches`, `commits`, `files`, `diff`, `compare`, `cherryPick`, `refs`, `snapshots`, `workspace`, and `sync`.
+This works across all clients: `repos`, `branches`, `commits`, `files`, `diff`, `compare`, `cherryPick`, `refs`, `snapshots`, `workspace`, `sync`, and `graph`.
 
 Create a namespaced repo:
 
@@ -680,6 +680,85 @@ await git.lfs.unlock("my-repo", "lock_abc", { force: true });
 <Callout type="info">
 LFS file upload/download happens automatically via `git lfs push` / `git lfs pull`. The SDK provides access to metadata and locking — not the file transfer itself. See the [LFS Guide](/docs/git-protocol/lfs) for git command usage.
 </Callout>
+
+## Code Graph
+
+Structural code intelligence — query call graphs, dependencies, impact analysis across 30+ languages.
+
+```typescript
+// Trigger graph reindex
+await git.graph.triggerIndex("my-repo", { branch: "main" });
+
+// Check status
+const { data: status } = await git.graph.indexStatus("my-repo");
+console.log(status.status); // "ready"
+console.log(status.nodes_count); // 1247
+
+// Who calls this function?
+const { data } = await git.graph.query("my-repo", {
+  type: "callers",
+  name: "createUser",
+});
+for (const node of data.nodes) {
+  console.log(node.name, node.file_path, node.type);
+}
+
+// What breaks if I change UserModel?
+const { data: impact } = await git.graph.query("my-repo", {
+  type: "impact_analysis",
+  name: "UserModel",
+  max_depth: 3,
+});
+console.log(impact.nodes); // affected entities
+console.log(impact.edges); // edge chain
+
+// All entities in a file
+const { data: structure } = await git.graph.query("my-repo", {
+  type: "file_structure",
+  file_path: "src/auth.ts",
+});
+
+// Dead code detection
+const { data: unused } = await git.graph.query("my-repo", {
+  type: "unused_exports",
+});
+
+// Delete graph index
+await git.graph.deleteIndex("my-repo");
+```
+
+Query types: `callers`, `callees`, `dependencies`, `dependents`, `type_hierarchy`, `impact_analysis`, `file_structure`, `symbol_lookup`, `community`, `tests_for`, `unused_exports`, `circular_deps`, `api_routes`, `data_flow`.
+
+See the [Code Graph API reference](/docs/api-reference/code-graph) for full details.
+
+## Hybrid Search
+
+Fuses semantic (AI embeddings), graph (structural), and keyword results into a single ranked list.
+
+```typescript
+// Auto strategy — classifies query and adjusts weights
+const { data } = await git.graph.hybridSearch("my-repo", {
+  q: "authentication handler",
+  top_k: 10,
+});
+console.log(data.strategy_used); // "semantic"
+for (const r of data.results) {
+  console.log(r.name, r.score, r.sources); // ["semantic", "graph"]
+}
+
+// Force graph-heavy search
+const { data: deps } = await git.graph.hybridSearch("my-repo", {
+  q: "what calls processPayment",
+  strategy: "graph",
+});
+
+// Include graph relationships in results
+const { data: detailed } = await git.graph.hybridSearch("my-repo", {
+  q: "user service",
+  include_graph: true,
+});
+console.log(detailed.results[0].relationships);
+```
 
 ## Full Example: AI Agent Workflow
 
