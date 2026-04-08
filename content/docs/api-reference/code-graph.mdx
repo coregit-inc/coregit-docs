@@ -1,0 +1,291 @@
+---
+title: Code Graph & Hybrid Search
+description: Structural code intelligence — call graphs, dependencies, impact analysis, and hybrid search.
+---
+
+Query structural relationships in your codebase — who calls a function, what depends on a class, what breaks if you change something. Combine with semantic search for hybrid retrieval.
+
+## How It Works
+
+1. **Index** your repository — code is parsed with Tree-sitter (30+ languages), entities and relationships extracted into a graph stored in Postgres
+2. **Query** the graph — 14 query types from simple symbol lookup to multi-hop impact analysis, all version-aware
+3. **Hybrid search** — fuses semantic (Pinecone), graph (Postgres), and keyword results with weighted RRF fusion
+
+| Component | Description |
+|-----------|-------------|
+| Parser | Tree-sitter (30+ languages, regex fallback) |
+| Graph storage | Neon Postgres (code_node + code_edge tables) |
+| Caching | Cloudflare KV (600s TTL, `X-Cache` header) |
+
+**Performance:** Graph queries are cached in KV keyed by commit SHA + query params. Cache hit: ~5ms. Cache miss: ~50-80ms.
+
+## Index a Repository
+
+Before querying the graph, index the repository.
+
+```http
+POST /v1/repos/:slug/graph/index
+```
+
+**Permission:** Write access required.
+
+```json
+{
+  "branch": "main"
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `branch` | No | Branch to index (default: repo's default branch) |
+
+### Response `202`
+
+```json
+{
+  "status": "accepted",
+  "branch": "main"
+}
+```
+
+Indexing is asynchronous via queue. Poll the status endpoint.
+
+## Check Index Status
+
+```http
+GET /v1/repos/:slug/graph/index/status
+```
+
+### Response `200`
+
+```json
+{
+  "status": "ready",
+  "branch": "main",
+  "last_commit_sha": "e713179f57ea...",
+  "nodes_count": 1247,
+  "edges_count": 3891,
+  "total_batches": 3,
+  "processed_batches": 3,
+  "indexed_at": "2026-04-08T22:34:52.464Z",
+  "error": null
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `status` | `not_indexed`, `pending`, `indexing`, `ready`, or `failed` |
+| `nodes_count` | Total entities (functions, classes, etc.) |
+| `edges_count` | Total relationships (calls, imports, etc.) |
+
+## Graph Query
+
+```http
+POST /v1/repos/:slug/graph/query
+```
+
+```json
+{
+  "type": "callers",
+  "name": "createUser",
+  "ref": "main",
+  "max_depth": 3
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `type` | Yes | Query type (see table below) |
+| `name` | Depends | Entity name for most query types |
+| `file_path` | Depends | File path (for `file_structure`) |
+| `community_id` | Depends | Cluster ID (for `community`) |
+| `ref` | No | Branch or commit SHA (default: repo's default branch) |
+| `max_depth` | No | Max traversal depth for recursive queries (default: 3, max: 5) |
+
+### Query Types
+
+| Type | Required Fields | Description |
+|------|----------------|-------------|
+| `callers` | `name` | Who calls function X? |
+| `callees` | `name` | What does function X call? |
+| `dependencies` | `name` | What does X depend on? (multi-hop) |
+| `dependents` | `name` | What depends on X? (multi-hop) |
+| `type_hierarchy` | `name` | Inheritance chain (extends/implements) |
+| `impact_analysis` | `name` | What breaks if X changes? (with edges) |
+| `file_structure` | `file_path` | All entities in a file |
+| `symbol_lookup` | `name` | Find entity by name (case-insensitive) |
+| `community` | `community_id` | All entities in a cluster |
+| `tests_for` | `name` | Tests for function X |
+| `unused_exports` | — | Exported symbols with no references |
+| `circular_deps` | — | Circular import dependencies |
+| `api_routes` | — | All API endpoints |
+| `data_flow` | `name` | Read/write chain for a variable |
+
+### Response `200`
+
+```json
+{
+  "nodes": [
+    {
+      "id": "abc123:Function:handleLogin",
+      "type": "Function",
+      "name": "handleLogin",
+      "file_path": "src/auth/login.ts",
+      "blob_sha": "abc123...",
+      "start_line": 15,
+      "end_line": 42,
+      "signature": "async function handleLogin(req: Request): Promise<Response>",
+      "language": "typescript",
+      "exported": true,
+      "complexity": 8,
+      "community_id": null
+    }
+  ],
+  "edges": [
+    {
+      "source_id": "abc123:Function:handleLogin",
+      "target_id": "def456:Function:createUser",
+      "type": "CALLS"
+    }
+  ],
+  "query_type": "callers",
+  "ref": "main"
+}
+```
+
+`edges` is only present for `impact_analysis` queries. The `X-Cache` header indicates whether the result was served from cache.
+
+### Node Types
+
+Function, Class, Interface, Enum, Type, Variable, Module, Decorator, Test, Route, Comment, File
+
+### Edge Types
+
+CALLS, IMPORTS, EXTENDS, IMPLEMENTS, CONTAINS, EXPORTS, USES_TYPE, RETURNS_TYPE, OVERRIDES, DECORATES, TESTS, MEMBER_OF, READS, WRITES, THROWS, DOCUMENTS
+
+## Hybrid Search
+
+Combines semantic search (AI embeddings), graph search (structural symbol lookup), and keyword search into a single fused result set.
+
+```http
+POST /v1/repos/:slug/hybrid-search
+```
+
+```json
+{
+  "q": "authentication handler",
+  "ref": "main",
+  "strategy": "auto",
+  "top_k": 10,
+  "include_graph": false
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `q` | Yes | Search query (max 1000 chars) |
+| `ref` | No | Branch or commit SHA |
+| `strategy` | No | `auto` (default), `semantic`, `graph`, or `hybrid` |
+| `top_k` | No | Number of results (default: 10, max: 50) |
+| `include_graph` | No | Include graph relationships for top results |
+
+### Strategy Weights
+
+With `auto` strategy, the query is classified and weights are set accordingly:
+
+| Query Pattern | Semantic | Graph | Keyword |
+|--------------|----------|-------|---------|
+| Structural ("calls", "depends") | 0.1 | 0.8 | 0.1 |
+| Symbol-like (camelCase, dots) | 0.1 | 0.3 | 0.6 |
+| Natural language (default) | 0.6 | 0.2 | 0.2 |
+| Impact ("breaks", "affects") | 0.2 | 0.7 | 0.1 |
+
+### Response `200`
+
+```json
+{
+  "results": [
+    {
+      "file_path": "src/auth/login.ts",
+      "name": "handleLogin",
+      "type": "Function",
+      "score": 0.85,
+      "sources": ["semantic", "graph"],
+      "start_line": 15,
+      "end_line": 42,
+      "language": "typescript",
+      "signature": "async function handleLogin(req: Request)"
+    }
+  ],
+  "query": "authentication handler",
+  "ref": "main",
+  "strategy_used": "semantic"
+}
+```
+
+The `sources` array shows which retrievers contributed to each result.
+
+## Delete Graph Index
+
+```http
+DELETE /v1/repos/:slug/graph/index
+```
+
+**Permission:** Write access required.
+
+### Response `200`
+
+```json
+{
+  "status": "deleted"
+}
+```
+
+## Auto-Indexing
+
+When a repository has `auto_index: true`, both semantic and graph indexes are updated automatically on each commit. No manual reindex needed.
+
+## SDK Examples
+
+```typescript
+import { createCoregitClient } from "@coregit/sdk";
+
+const git = createCoregitClient({ apiKey: "cgk_..." });
+
+// Trigger graph reindex
+await git.graph.triggerIndex("my-app", { branch: "main" });
+
+// Check status
+const status = await git.graph.indexStatus("my-app");
+console.log(status.data);
+
+// Query: who calls createUser?
+const callers = await git.graph.query("my-app", {
+  type: "callers",
+  name: "createUser",
+});
+console.log(callers.data?.nodes);
+
+// Query: what breaks if I change UserModel?
+const impact = await git.graph.query("my-app", {
+  type: "impact_analysis",
+  name: "UserModel",
+  max_depth: 3,
+});
+console.log(impact.data?.nodes, impact.data?.edges);
+
+// Hybrid search
+const results = await git.graph.hybridSearch("my-app", {
+  q: "authentication handler",
+  strategy: "auto",
+  top_k: 10,
+});
+console.log(results.data?.results);
+
+// Hybrid search with graph relationships
+const detailed = await git.graph.hybridSearch("my-app", {
+  q: "payment processing",
+  include_graph: true,
+});
+console.log(detailed.data?.results[0]?.relationships);
+```
