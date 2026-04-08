@@ -150,3 +150,14 @@ Rate limit headers are included on every response:
 
 - **Free tier**: 10,000 API calls / month, 5 repos, 1 GB storage
 - **Usage tier**: Unlimited (metered billing)
+
+## Caching
+
+Git objects are content-addressed and immutable. CoreGit returns caching headers on endpoints that serve immutable content:
+
+| Endpoint | ETag | Cache-Control |
+|----------|------|---------------|
+| `GET /v1/repos/:slug/tree/*` | Tree object SHA | `immutable` (commit SHA ref) / `max-age=60` (branch ref) |
+| `GET /v1/repos/:slug/blob/*` | Blob object SHA | `immutable` |
+
+Use `If-None-Match` to avoid re-downloading unchanged data. Responses return `304 Not Modified` when the content hasn't changed.

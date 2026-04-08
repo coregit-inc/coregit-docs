@@ -223,11 +223,15 @@ await git.search.triggerIndex("my-app", { branch: "main" });
 
 // 2. Wait for indexing to complete
 let status;
+let attempts = 0;
 do {
   const { data } = await git.search.indexStatus("my-app", "main");
   status = data?.status;
-  if (status === "indexing") await new Promise(r => setTimeout(r, 2000));
-} while (status === "indexing");
+  if (status === "indexing" || status === "pending") {
+    if (++attempts > 60) throw new Error("Indexing timed out");
+    await new Promise(r => setTimeout(r, 2000));
+  }
+} while (status === "indexing" || status === "pending");
 
 // 3. Search current branch
 const { data } = await git.search.semantic("my-app", {

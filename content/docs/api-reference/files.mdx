@@ -12,6 +12,12 @@ GET /v1/repos/:namespace/:slug/tree/:ref/*path
 
 The `:ref` can be a branch name, tag, or commit SHA.
 
+### Query Parameters
+
+| Parameter | Description |
+|-----------|-------------|
+| `recursive` | Set to `true` to return all entries in all subdirectories as a flat list. Capped at 10,000 entries. |
+
 **Response** `200`:
 
 ```json
@@ -22,11 +28,14 @@ The `:ref` can be a branch name, tag, or commit SHA.
   ],
   "path": "",
   "ref": "main",
-  "sha": "d4e5..."
+  "sha": "d4e5...",
+  "truncated": false
 }
 ```
 
-Entry types are `"folder"` or `"file"`.
+Entry types are `"folder"` or `"file"`. When `recursive=true`, all entries from all subdirectories are returned in a flat list with full relative paths. If the repository contains more than 10,000 entries, `truncated` will be `true`.
+
+Supports `ETag` / `If-None-Match` for caching. When the ref is a commit SHA, responses include `Cache-Control: immutable`.
 
 ## Read File
 

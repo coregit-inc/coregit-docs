@@ -267,6 +267,10 @@ for (const entry of data.items) {
   console.log(entry.name, entry.type); // "auth.ts" "file"
 }
 
+// Recursive tree (all files in one call)
+const { data: all } = await git.files.tree("my-repo", "main", "", { recursive: true });
+console.log(all.items.length, all.truncated); // 142 false
+
 // Read file
 const { data } = await git.files.blob("my-repo", "main", "src/auth.ts");
 console.log(data.content); // file content (utf-8 or base64)
