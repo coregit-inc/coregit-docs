@@ -1,0 +1,113 @@
+---
+title: Forks & Templates
+description: Fork template repositories to create new projects instantly with inherited search and code graph.
+---
+
+## Overview
+
+Templates let platforms offer starter projects. Users fork templates into their own namespace, getting a full copy of the code with semantic search and code graph available immediately — no re-indexing required.
+
+## Create a Template
+
+Mark any repository as a template using `is_template` on create or update:
+
+```http
+POST /v1/repos
+```
+
+```json
+{
+  "slug": "nextjs-starter",
+  "is_template": true,
+  "visibility": "public",
+  "description": "Next.js starter template"
+}
+```
+
+Or update an existing repo:
+
+```http
+PATCH /v1/repos/nextjs-starter
+```
+
+```json
+{
+  "is_template": true
+}
+```
+
+## List Templates
+
+```http
+GET /v1/repos?is_template=true
+```
+
+Returns only template repositories.
+
+## Fork a Repository
+
+```http
+POST /v1/repos/:slug/fork
+POST /v1/repos/:namespace/:slug/fork
+```
+
+```json
+{
+  "slug": "my-app",
+  "namespace": "alice",
+  "description": "My project based on nextjs-starter"
+}
+```
+
+- `slug` — Required. Target repository slug
+- `namespace` — Optional. Target namespace
+- `description` — Optional. Defaults to source description
+- `default_branch` — Optional. Defaults to source default branch
+
+**Response** `201`:
+
+```json
+{
+  "id": "fork_xyz789",
+  "namespace": "alice",
+  "slug": "my-app",
+  "description": "My project based on nextjs-starter",
+  "default_branch": "main",
+  "visibility": "private",
+  "is_template": false,
+  "forked_from": {
+    "repo_id": "repo_abc123",
+    "org_id": "org_456",
+    "slug": "nextjs-starter",
+    "namespace": null
+  },
+  "semantic_inherited": true,
+  "graph_copied": true,
+  "graph_nodes_count": 42,
+  "git_url": "https://api.coregit.dev/myorg/alice/my-app.git",
+  "api_url": "https://api.coregit.dev/v1/repos/alice/my-app",
+  "created_at": "2025-01-01T00:00:00Z"
+}
+```
+
+## What Happens During Fork
+
+1. **Git objects** — All objects (blobs, trees, commits, refs) are fully copied to the fork's R2 storage
+2. **Code graph** — All nodes and edges are bulk-copied via SQL with repo-scoped IDs
+3. **Semantic vectors** — Not copied. Search queries both the fork's Pinecone namespace and the parent's namespace in parallel, merging results. As the fork diverges, new content is indexed into the fork's own namespace
+
+## Access Control
+
+| Scenario | Required |
+|----------|----------|
+| Same-org fork | Read access on source repo |
+| Cross-org fork | Source must be `is_template: true` AND `visibility: "public"` |
+
+## Fork Behavior
+
+- Forks are independent copies — changes to the template do not propagate
+- Forks are always created with `visibility: "private"`
+- Forks are never templates themselves (`is_template: false`)
+- Deleting the parent template does not affect existing forks
+- Semantic search on forks gracefully degrades if the parent is deleted
+- The `forked_from` field on the repo object shows the parent relationship
