@@ -143,6 +143,38 @@ const { data } = await git.repos.delete("my-repo");
 console.log(data.deleted); // true
 ```
 
+## Forks & Templates
+
+Create template repos and let users fork them instantly with inherited search and code graph.
+
+```typescript
+// Create a template
+await git.repos.create({
+  slug: "nextjs-starter",
+  is_template: true,
+  visibility: "public",
+});
+
+// Or mark an existing repo as template
+await git.repos.update("nextjs-starter", { is_template: true });
+
+// List only templates
+const { data } = await git.repos.list({ is_template: true });
+
+// Fork a template into a user's namespace
+const { data: fork } = await git.repos.fork("nextjs-starter", {
+  slug: "my-app",
+  namespace: "alice",
+});
+
+console.log(fork.forked_from.slug);     // "nextjs-starter"
+console.log(fork.semantic_inherited);    // true — search works immediately
+console.log(fork.graph_copied);         // true — code graph available
+console.log(fork.graph_nodes_count);    // 42
+```
+
+Forks get a full copy of git objects and code graph. Semantic search vectors are inherited from the parent without duplication — queries search both namespaces in parallel.
+
 ## Commits
 
 The core feature — create multi-file commits in a single call.
