@@ -394,7 +394,7 @@ await cg.commits.create("my-research", {
   branch: "main",
   message: "Add source: Attention Is All You Need",
   author: { name: "alice", email: "alice@example.com" },
-  files: [{ path: "raw/attention-paper.md", content: "..." }],
+  changes: [{ path: "raw/attention-paper.md", content: "..." }],
 });
 ```
 
@@ -405,7 +405,7 @@ await cg.commits.create("my-research", {
   branch: "main",
   message: "ingest: Attention Is All You Need",
   author: { name: "wiki-agent", email: "agent@example.com" },
-  files: [
+  changes: [
     { path: "wiki/transformers.md", content: "---\ntitle: \"Transformer Architecture\"\nsummary: \"...\"\ntags: [deep-learning]\ntype: concept\nsources: [raw/attention-paper.md]\n---\n\nContent here..." },
     { path: "index.md", content: "...updated index..." },
     { path: "log.md", content: "...appended entry..." },

@@ -69,7 +69,7 @@ await cg.commits.create("my-research", {
   branch: "main",
   message: "Add source: Attention Is All You Need",
   author: { name: "alice", email: "alice@example.com" },
-  files: [{
+  changes: [{
     path: "raw/attention-is-all-you-need.md",
     content: articleContent,
   }],
@@ -85,7 +85,7 @@ await cg.commits.create("my-research", {
   branch: "main",
   message: "ingest: Attention Is All You Need",
   author: { name: "wiki-agent", email: "agent@example.com" },
-  files: [
+  changes: [
     {
       path: "wiki/source-summaries/attention-paper.md",
       content: `---
