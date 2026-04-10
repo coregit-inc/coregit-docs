@@ -1,5 +1,5 @@
 {
   "title": "Guides",
-  "pages": ["ai-agents", "sandbox-integration", "security", "scalability-benchmarks", "roi-benchmarks", "custom-domains"]
+  "pages": ["llm-wiki", "ai-agents", "sandbox-integration", "security", "scalability-benchmarks", "roi-benchmarks", "custom-domains"]
 }
 

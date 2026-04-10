@@ -792,6 +792,87 @@ const { data: detailed } = await git.graph.hybridSearch("my-repo", {
 console.log(detailed.results[0].relationships);
 ```
 
+## LLM Wiki
+
+Create and query persistent knowledge bases maintained by LLM agents. Based on the [LLM Wiki pattern](https://github.com/karpathy/llm-wiki) by Andrej Karpathy.
+
+```typescript
+// Create a wiki (forks llm-wiki-template)
+const { data: wiki } = await git.wiki.init({
+  slug: "my-research",
+  title: "AI Research Wiki",
+  description: "Deep dive into transformer architectures",
+});
+
+// List pages with parsed frontmatter
+const { data: pages } = await git.wiki.listPages("my-research", {
+  type: "concept",
+  tag: "deep-learning",
+  sort: "updated",
+});
+for (const page of pages.pages) {
+  console.log(page.title, page.tags, page.word_count);
+}
+
+// Read a single page
+const { data: page } = await git.wiki.getPage("my-research", "transformers.md");
+console.log(page.frontmatter.summary);
+console.log(page.content);
+
+// List raw sources
+const { data: sources } = await git.wiki.listSources("my-research");
+
+// Read source content
+const { data: source } = await git.wiki.getSource("my-research", "attention-paper.md");
+
+// Get wiki index (content catalog — what agents read first)
+const { data: index } = await git.wiki.getIndex("my-research");
+
+// Get activity log (ingest history)
+const { data: log } = await git.wiki.getLog("my-research", { limit: 10 });
+for (const entry of log.entries) {
+  console.log(`[${entry.date}] ${entry.operation}: ${entry.title}`);
+}
+
+// Generate llms.txt (structured text for external LLMs)
+const { data: llmsTxt } = await git.wiki.llmsTxt("my-research", { format: "full" });
+
+// Semantic search across wiki pages AND raw sources
+const { data: results } = await git.wiki.search("my-research", {
+  q: "How does multi-head attention work?",
+  scope: "all", // "wiki" | "sources" | "all"
+  top_k: 10,
+});
+
+// Knowledge graph (nodes, edges, tag clusters)
+const { data: graph } = await git.wiki.graph("my-research");
+console.log(graph.stats); // { pages: 42, sources: 15, links: 87, orphans: 3 }
+
+// Wiki health stats
+const { data: stats } = await git.wiki.stats("my-research");
+console.log(stats.types); // { concept: 18, entity: 12, ... }
+```
+
+### Writing to the Wiki
+
+Wiki endpoints are read-only. Use the standard commits API to write pages:
+
+```typescript
+// Ingest workflow: add source + create wiki pages in one atomic commit
+await git.commits.create("my-research", {
+  branch: "main",
+  message: "ingest: Attention Is All You Need",
+  author: { name: "wiki-agent", email: "agent@example.com" },
+  changes: [
+    { path: "raw/attention-paper.md", content: paperContent },
+    { path: "wiki/transformers.md", content: "---\ntitle: \"Transformers\"\nsummary: \"...\"\ntags: [deep-learning]\ntype: concept\nsources: [raw/attention-paper.md]\nrelated: [wiki/attention.md]\ncreated: \"2026-04-10\"\nupdated: \"2026-04-10\"\n---\n\nContent..." },
+    { path: "wiki/attention.md", content: "---\ntitle: \"Attention\"\n..." },
+    { path: "index.md", content: updatedIndex },
+    { path: "log.md", content: updatedLog },
+  ],
+});
+```
+
 ## Full Example: AI Agent Workflow
 
 ```typescript

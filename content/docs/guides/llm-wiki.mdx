@@ -1,0 +1,230 @@
+---
+title: LLM Wiki
+description: Build a persistent, version-controlled knowledge base maintained by LLMs — the wiki pattern by Andrej Karpathy, powered by Coregit.
+---
+
+Most people's experience with LLMs and documents looks like RAG: upload files, retrieve chunks at query time, generate an answer. The LLM is rediscovering knowledge from scratch on every question. Nothing accumulates.
+
+**LLM Wiki is different.** Instead of retrieving from raw documents, the LLM **incrementally builds and maintains a persistent wiki** — a structured, interlinked collection of markdown files. When you add a new source, the LLM reads it, extracts key information, and integrates it into the existing wiki. The knowledge is compiled once and kept current, not re-derived on every query.
+
+This pattern was popularized by [Andrej Karpathy](https://github.com/karpathy/llm-wiki). Coregit makes it version-controlled, API-accessible, and searchable.
+
+## Why Coregit for LLM Wiki
+
+Karpathy's original pattern uses a local folder + Claude Code. Coregit adds:
+
+| Local wiki | Coregit wiki |
+|---|---|
+| Local filesystem only | API-accessible from any agent |
+| No version history | Full git history, branches, snapshots |
+| No search (or basic grep) | Semantic search (Voyage AI + Pinecone) |
+| Single user | Multi-tenant, scoped tokens |
+| No traceability | Every edit is a git commit |
+| Manual setup | One API call to create |
+
+### Addressing known criticisms
+
+**Contextual Thinning** — "summaries lose niche details." In Coregit, raw sources are preserved in `raw/` and searchable via semantic search. The wiki is a layer on top of RAG, not a replacement.
+
+**Telephone Game** — "LLM summaries compound errors." Git history traces every change. Snapshots enable instant rollback. Raw sources are always available for verification.
+
+**High effort** — "LLM processing on every update." Coregit's delta indexing only processes changed files. Semantic vectors are content-addressed by blob SHA — identical content is never re-indexed.
+
+## Quick Start
+
+### 1. Create a wiki
+
+```bash
+curl -X POST https://api.coregit.dev/v1/repos/my-research/wiki/init \
+  -H "x-api-key: cgk_live_YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"slug": "my-research", "title": "AI Research"}'
+```
+
+Or with the SDK:
+
+```typescript
+import { createCoregitClient } from "@coregit/sdk";
+
+const cg = createCoregitClient({ apiKey: "cgk_live_YOUR_KEY" });
+
+const { data: wiki } = await cg.wiki.init({
+  slug: "my-research",
+  title: "AI Research",
+});
+```
+
+Or with the CLI:
+
+```bash
+cgt wiki init my-research --title "AI Research"
+```
+
+### 2. Add a source
+
+Drop a document into `raw/` using the standard commits API:
+
+```typescript
+await cg.commits.create("my-research", {
+  branch: "main",
+  message: "Add source: Attention Is All You Need",
+  author: { name: "alice", email: "alice@example.com" },
+  files: [{
+    path: "raw/attention-is-all-you-need.md",
+    content: articleContent,
+  }],
+});
+```
+
+### 3. Let your LLM agent process it
+
+Your agent reads the source, creates wiki pages, updates the index and log — all in one atomic commit:
+
+```typescript
+await cg.commits.create("my-research", {
+  branch: "main",
+  message: "ingest: Attention Is All You Need",
+  author: { name: "wiki-agent", email: "agent@example.com" },
+  files: [
+    {
+      path: "wiki/source-summaries/attention-paper.md",
+      content: `---
+title: "Attention Is All You Need"
+summary: "Introduces the Transformer architecture, replacing recurrence with self-attention"
+tags: [transformers, attention, architecture]
+type: source-summary
+sources: [raw/attention-is-all-you-need.md]
+created: "2026-04-10"
+updated: "2026-04-10"
+related: [wiki/transformers.md, wiki/attention.md]
+---
+
+## Key Contributions
+...`,
+    },
+    {
+      path: "wiki/transformers.md",
+      content: `---
+title: "Transformer Architecture"
+summary: "The dominant architecture for sequence modeling since 2017"
+tags: [transformers, deep-learning, architecture]
+type: concept
+sources: [raw/attention-is-all-you-need.md]
+created: "2026-04-10"
+updated: "2026-04-10"
+related: [wiki/attention.md, wiki/source-summaries/attention-paper.md]
+---
+
+## Overview
+...`,
+    },
+    // Update index.md and log.md too
+  ],
+});
+```
+
+### 4. Query the wiki
+
+```typescript
+const { data } = await cg.wiki.search("my-research", {
+  q: "How does self-attention work?",
+  scope: "all", // searches both wiki pages and raw sources
+});
+```
+
+### 5. Browse the knowledge graph
+
+```typescript
+const { data: graph } = await cg.wiki.graph("my-research");
+// graph.nodes — all pages and sources
+// graph.edges — related links, source references, shared tags
+// graph.stats — { pages: 42, sources: 15, orphans: 3 }
+```
+
+### 6. Export for other LLMs
+
+```typescript
+const { data: llmsTxt } = await cg.wiki.llmsTxt("my-research", {
+  format: "full",
+});
+// Plain text summary of the entire wiki — paste into any LLM's context
+```
+
+## Architecture
+
+Three layers, following Karpathy's design:
+
+### Raw sources (`raw/`)
+
+Immutable documents — articles, papers, transcripts, data files. The LLM reads from them but never modifies them. They are the source of truth.
+
+### Wiki (`wiki/`)
+
+LLM-generated markdown pages — summaries, entity pages, concept pages, comparisons. The LLM owns this layer entirely. Each page has YAML frontmatter:
+
+```yaml
+---
+title: "Page Title"
+summary: "One-sentence summary for LLM context windows"
+tags: [tag1, tag2]
+sources: [raw/article.md]
+created: "2026-04-10"
+updated: "2026-04-10"
+related: [wiki/other-page.md]
+type: entity | concept | source-summary | comparison | analysis
+---
+```
+
+### Schema (`schema.md`)
+
+The configuration file that tells LLM agents how the wiki is structured — what conventions to follow, what workflows to use for ingesting sources and maintaining the wiki. This is the equivalent of `CLAUDE.md` or `AGENTS.md`.
+
+### Special files
+
+- **`index.md`** — Content catalog. The LLM reads this first to find relevant pages. Updated on every ingest.
+- **`log.md`** — Append-only chronological log. Each entry: `## [date] operation | Title`.
+- **`wiki.json`** — Wiki configuration (title, llms.txt settings).
+
+## Operations
+
+### Ingest
+
+Drop a new source into `raw/` and have your LLM process it. A single ingest might touch 10-15 wiki pages:
+
+1. Read the new source
+2. Write a source-summary page
+3. Update existing entity/concept pages with new information
+4. Note contradictions with existing claims
+5. Update `index.md`
+6. Append to `log.md`
+
+### Query
+
+Search the wiki with natural language. The LLM finds relevant pages, reads them, and synthesizes an answer. Good answers can be filed back into the wiki as new pages.
+
+### Lint
+
+Periodically health-check the wiki using `GET /wiki/stats`:
+
+- Orphan pages (no inbound links)
+- Stale claims (newer sources contradict)
+- Missing pages (concepts mentioned but no page)
+- Broken cross-references
+
+## Use Cases
+
+- **Personal knowledge** — goals, health, psychology, self-improvement
+- **Research** — papers, articles, reports, evolving thesis
+- **Reading a book** — characters, themes, plot threads
+- **Business** — Slack threads, meeting transcripts, customer calls
+- **Competitive analysis** — market research, due diligence
+
+## Integration with AI Agents
+
+Any LLM agent that can make HTTP calls can maintain a Coregit wiki:
+
+- **Claude Code** — use the Coregit MCP server or SDK
+- **OpenAI Codex** — call the REST API directly
+- **Custom agents** — use `@coregit/sdk` in TypeScript or the REST API from any language
+
+The `schema.md` file in each wiki tells the agent how to operate — making the agent a disciplined wiki maintainer rather than a generic chatbot.

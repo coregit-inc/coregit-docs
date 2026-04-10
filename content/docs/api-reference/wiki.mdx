@@ -1,0 +1,416 @@
+---
+title: LLM Wiki
+description: API endpoints for LLM-maintained knowledge bases — the wiki pattern by Andrej Karpathy, powered by Coregit.
+---
+
+Build persistent, version-controlled knowledge bases that LLMs maintain for you. Based on the [LLM Wiki pattern](https://github.com/karpathy/llm-wiki) by Andrej Karpathy — where an LLM incrementally builds and maintains a structured wiki from raw sources.
+
+A Coregit LLM Wiki is a regular repository with a specific structure:
+
+```
+wiki.json          # Configuration
+schema.md          # LLM instructions
+index.md           # Content catalog
+log.md             # Activity log
+raw/               # Immutable source documents
+wiki/              # LLM-generated pages
+```
+
+## Create a Wiki
+
+Fork the `llm-wiki-template` and set up wiki configuration in one call.
+
+```http
+POST /v1/repos/:slug/wiki/init
+```
+
+**Permission:** Write access required.
+
+```json
+{
+  "slug": "my-research",
+  "title": "AI Research Wiki",
+  "description": "Deep dive into transformer architectures",
+  "namespace": "alice",
+  "visibility": "private"
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `slug` | Yes | Repository slug for the new wiki |
+| `title` | No | Wiki title (default: "My Knowledge Base") |
+| `description` | No | Wiki description |
+| `namespace` | No | Optional namespace |
+| `visibility` | No | `private` (default) or `public` |
+
+### Response `201`
+
+```json
+{
+  "id": "abc123",
+  "slug": "my-research",
+  "description": "AI Research Wiki",
+  "default_branch": "main",
+  "visibility": "private",
+  "wiki_config": {
+    "version": 1,
+    "title": "AI Research Wiki",
+    "description": "Deep dive into transformer architectures",
+    "llms_txt": {
+      "include_sources": false,
+      "max_pages": 500,
+      "sort": "updated"
+    }
+  },
+  "git_url": "https://api.coregit.dev/myorg/my-research.git",
+  "api_url": "https://api.coregit.dev/v1/repos/my-research",
+  "created_at": "2026-04-10T12:00:00Z"
+}
+```
+
+### SDK
+
+```typescript
+const { data } = await cg.wiki.init({
+  slug: "my-research",
+  title: "AI Research Wiki",
+  description: "Deep dive into transformer architectures",
+});
+```
+
+## List Wiki Pages
+
+List all pages under `wiki/` with parsed YAML frontmatter.
+
+```http
+GET /v1/repos/:slug/wiki/pages
+```
+
+| Param | Description |
+|-------|-------------|
+| `type` | Filter by page type: `entity`, `concept`, `source-summary`, `comparison`, `analysis` |
+| `tag` | Filter by tag |
+| `sort` | Sort field: `updated` (default), `created`, `title` |
+| `limit` | Max results (default: 50, max: 200) |
+| `offset` | Pagination offset |
+| `ref` | Branch or commit SHA |
+
+### Response `200`
+
+```json
+{
+  "pages": [
+    {
+      "path": "wiki/transformers.md",
+      "title": "Transformer Architecture",
+      "summary": "The dominant architecture for sequence modeling since 2017",
+      "tags": ["deep-learning", "architecture"],
+      "type": "concept",
+      "sources": ["raw/attention-is-all-you-need.md"],
+      "related": ["wiki/attention.md", "wiki/bert.md"],
+      "created": "2026-04-10",
+      "updated": "2026-04-10",
+      "word_count": 1250
+    }
+  ],
+  "total": 42,
+  "ref": "main"
+}
+```
+
+### SDK
+
+```typescript
+const { data } = await cg.wiki.listPages("my-research", {
+  type: "concept",
+  tag: "deep-learning",
+  sort: "updated",
+});
+```
+
+## Read a Wiki Page
+
+Get a single page with parsed frontmatter and full content.
+
+```http
+GET /v1/repos/:slug/wiki/pages/:path
+```
+
+### Response `200`
+
+```json
+{
+  "path": "wiki/transformers.md",
+  "frontmatter": {
+    "title": "Transformer Architecture",
+    "summary": "The dominant architecture for sequence modeling since 2017",
+    "tags": ["deep-learning", "architecture"],
+    "sources": ["raw/attention-is-all-you-need.md"],
+    "type": "concept",
+    "related": ["wiki/attention.md"],
+    "created": "2026-04-10",
+    "updated": "2026-04-10"
+  },
+  "content": "The Transformer was introduced in...",
+  "word_count": 1250,
+  "sha": "a1b2c3d4",
+  "ref": "main"
+}
+```
+
+### SDK
+
+```typescript
+const { data } = await cg.wiki.getPage("my-research", "transformers.md");
+```
+
+## List Raw Sources
+
+List files in the `raw/` directory.
+
+```http
+GET /v1/repos/:slug/wiki/sources
+```
+
+### SDK
+
+```typescript
+const { data } = await cg.wiki.listSources("my-research");
+```
+
+## Read a Raw Source
+
+Get the content of a source file.
+
+```http
+GET /v1/repos/:slug/wiki/sources/:path
+```
+
+### SDK
+
+```typescript
+const { data } = await cg.wiki.getSource("my-research", "attention-is-all-you-need.md");
+```
+
+## Get Wiki Index
+
+Read the `index.md` content catalog — the file LLM agents read first to understand wiki structure.
+
+```http
+GET /v1/repos/:slug/wiki/index
+```
+
+### SDK
+
+```typescript
+const { data } = await cg.wiki.getIndex("my-research");
+```
+
+## Get Activity Log
+
+Read parsed entries from `log.md` — chronological record of ingests, queries, and lint passes.
+
+```http
+GET /v1/repos/:slug/wiki/log
+```
+
+| Param | Description |
+|-------|-------------|
+| `limit` | Max entries (default: 20, max: 100) |
+| `offset` | Pagination offset |
+
+### Response `200`
+
+```json
+{
+  "entries": [
+    {
+      "date": "2026-04-10",
+      "operation": "ingest",
+      "title": "Attention Is All You Need",
+      "body": "Processed paper. Created wiki/transformers.md, updated wiki/attention.md."
+    }
+  ],
+  "total": 15,
+  "ref": "main"
+}
+```
+
+### SDK
+
+```typescript
+const { data } = await cg.wiki.getLog("my-research", { limit: 10 });
+```
+
+## Generate llms.txt
+
+Auto-generate a structured text file for external LLM consumption. Follows the emerging `llms.txt` convention.
+
+```http
+GET /v1/repos/:slug/wiki/llms.txt
+```
+
+| Param | Description |
+|-------|-------------|
+| `format` | `compact` (default) — summaries only. `full` — includes page content. |
+| `ref` | Branch or commit SHA |
+
+Returns `Content-Type: text/plain`. Cached by commit SHA.
+
+### Compact format
+
+```
+# AI Research Wiki
+> Deep dive into transformer architectures
+
+## Pages
+- [Transformer Architecture](wiki/transformers.md): The dominant architecture for sequence modeling since 2017
+- [Attention Mechanism](wiki/attention.md): Core mechanism enabling transformers to weigh input tokens
+
+## Sources
+- raw/attention-is-all-you-need.md (8,200 words)
+```
+
+### Full format
+
+Includes full page content after the summaries section.
+
+### SDK
+
+```typescript
+const { data } = await cg.wiki.llmsTxt("my-research", { format: "full" });
+```
+
+## Semantic Search
+
+Search across wiki pages AND raw sources using natural language. Wraps the existing [semantic search](/docs/api-reference/semantic-search) pipeline with wiki-specific scoping.
+
+```http
+POST /v1/repos/:slug/wiki/search
+```
+
+```json
+{
+  "q": "How does multi-head attention work?",
+  "scope": "all",
+  "top_k": 10
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `q` | Yes | Natural language query |
+| `scope` | No | `all` (default), `wiki` (only wiki pages), `sources` (only raw sources) |
+| `top_k` | No | Number of results (default: 10) |
+| `tag` | No | Filter wiki results by tag |
+| `type` | No | Filter wiki results by page type |
+
+Wiki page results include parsed `frontmatter`.
+
+### SDK
+
+```typescript
+const { data } = await cg.wiki.search("my-research", {
+  q: "How does multi-head attention work?",
+  scope: "wiki",
+});
+```
+
+## Knowledge Graph
+
+Get the wiki's knowledge graph — built from frontmatter `related` links, `sources` references, and shared `tags`.
+
+```http
+GET /v1/repos/:slug/wiki/graph
+```
+
+### Response `200`
+
+```json
+{
+  "nodes": [
+    { "path": "wiki/transformers.md", "title": "Transformer Architecture", "tags": ["deep-learning"], "type": "concept", "word_count": 1250 },
+    { "path": "raw/attention-paper.md", "title": "attention-paper.md", "tags": [], "type": "source", "word_count": 0 }
+  ],
+  "edges": [
+    { "source": "wiki/transformers.md", "target": "wiki/attention.md", "type": "related" },
+    { "source": "wiki/transformers.md", "target": "raw/attention-paper.md", "type": "source-ref" },
+    { "source": "wiki/transformers.md", "target": "wiki/bert.md", "type": "shared-tag", "tag": "deep-learning" }
+  ],
+  "tag_clusters": {
+    "deep-learning": ["wiki/transformers.md", "wiki/bert.md"]
+  },
+  "stats": { "pages": 42, "sources": 15, "links": 87, "orphans": 3 },
+  "ref": "main"
+}
+```
+
+### SDK
+
+```typescript
+const { data } = await cg.wiki.graph("my-research");
+```
+
+## Wiki Stats
+
+Health overview — pages, sources, links, orphans, type distribution, last activity.
+
+```http
+GET /v1/repos/:slug/wiki/stats
+```
+
+### Response `200`
+
+```json
+{
+  "pages": 42,
+  "sources": 15,
+  "links": 87,
+  "orphans": 3,
+  "total_words": 52500,
+  "avg_words_per_page": 1250,
+  "types": { "concept": 18, "entity": 12, "source-summary": 10, "comparison": 2 },
+  "tags": 24,
+  "last_activity": "2026-04-10",
+  "ref": "main"
+}
+```
+
+### SDK
+
+```typescript
+const { data } = await cg.wiki.stats("my-research");
+```
+
+## Writing to the Wiki
+
+Wiki pages and sources are written using the standard [Commits API](/docs/api-reference/commits). The wiki endpoints are read-only convenience layers.
+
+To add a source:
+
+```typescript
+await cg.commits.create("my-research", {
+  branch: "main",
+  message: "Add source: Attention Is All You Need",
+  author: { name: "alice", email: "alice@example.com" },
+  files: [{ path: "raw/attention-paper.md", content: "..." }],
+});
+```
+
+To create or update a wiki page:
+
+```typescript
+await cg.commits.create("my-research", {
+  branch: "main",
+  message: "ingest: Attention Is All You Need",
+  author: { name: "wiki-agent", email: "agent@example.com" },
+  files: [
+    { path: "wiki/transformers.md", content: "---\ntitle: \"Transformer Architecture\"\nsummary: \"...\"\ntags: [deep-learning]\ntype: concept\nsources: [raw/attention-paper.md]\n---\n\nContent here..." },
+    { path: "index.md", content: "...updated index..." },
+    { path: "log.md", content: "...appended entry..." },
+  ],
+});
+```
+
+This is the pattern Karpathy describes — the LLM agent commits multiple files atomically (one for each updated page, plus index and log updates). Coregit's multi-file atomic commits make this a single API call.
