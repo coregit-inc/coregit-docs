@@ -1,71 +1,85 @@
 ---
 title: ROI & Benchmarks
-description: Executive intro, savings math, and current benchmark data for Coregit.
+description: Executive intro, savings math, and benchmark data for Coregit vs GitHub.
 ---
 
 ## Executive intro
 
-Coregit is a serverless Git hosting platform built for AI agents and automated workflows, with single-call API commits, standard Git protocol support, snapshots, and usage-based billing instead of seat licenses.
+Coregit is a serverless Git hosting platform built for AI agents and automated workflows. One API call commits any number of files — GitHub needs 13+ calls for the same operation. This translates directly to faster agent execution and lower compute costs.
+
+## The key number
+
+> **Commit 100 files: Coregit 24s vs GitHub 75s — 3.1x faster. One API call vs one hundred three.**
+
+## Benchmark summary
+
+Measured April 2026, Kazakhstan → US-East, private repos with authentication.
+
+| Operation | GitHub | Coregit | Faster | API Calls |
+| --- | --- | --- | --- | --- |
+| Commit 5 files | 6,475 ms | **3,106 ms** | **Coregit 2.1x** | 8 vs 1 |
+| Commit 10 files | 7,945 ms | **3,829 ms** | **Coregit 2.1x** | 13 vs 1 |
+| Commit 100 files | 74,836 ms | **24,494 ms** | **Coregit 3.1x** | 103 vs 1 |
+| Read file (warm) | 726 ms | 800 ms | GitHub 1.1x | 1 vs 1 |
+| List tree | 1,057 ms | **744 ms** | **Coregit 1.4x** | 1 vs 1 |
+| List commits (warm) | 829 ms | **753 ms** | **Coregit 1.1x** | 1 vs 1 |
+
+Full benchmark details: [Scalability Benchmarks](/docs/guides/scalability-benchmarks)
 
 ## Savings model
 
 ### Single-call commits eliminate HTTP chatter
 
-The API can commit N files in a single request, while GitHub's REST API still needs 7-14 calls for the same change set. Removing 13 HTTP round trips per 10-file commit reclaims measurable sandbox or agent time.
+GitHub needs N+3 sequential API calls for an N-file commit (N blob creates + get HEAD + create tree + create commit + update ref). Coregit does it in 1 call.
 
-| Workload (10-file commits/day) | HTTP requests avoided/day | Worker hours freed/month | Sandbox $ saved/month (@$1.50/h) |
+| Workload (10-file commits/day) | GitHub API calls/day | Coregit API calls/day | Time saved/day |
 | --- | --- | --- | --- |
-| 5,000 | 65,000 | 108 h | $160 |
-| 15,000 | 195,000 | 325 h | $490 |
-| 50,000 | 650,000 | 1,083 h | $1,625 |
+| 100 | 1,300 | 100 | ~8 minutes |
+| 1,000 | 13,000 | 1,000 | ~80 minutes |
+| 10,000 | 130,000 | 10,000 | ~13 hours |
+| 50,000 | 650,000 | 50,000 | ~67 hours |
 
-<small>Assumptions: GitHub needs 14 REST calls for a 10-file commit vs 1 call on Coregit, Coregit's own repo-create latency (~200 ms) is used as the per-call baseline, and Daytona-class sandboxes cost $1-1.50 per hour of compute.</small>
+<small>Based on measured latency: GitHub ~8s per 10-file commit, Coregit ~3.8s. Time saved = (8s - 3.8s) × commits/day.</small>
+
+### Agent compute savings
+
+AI coding agents (Cursor, Claude Code, Codex) spend compute time waiting for git operations. Faster commits = less billable agent time.
+
+| Agent workload | GitHub wait time | Coregit wait time | Compute saved/month | $ saved (@$1.50/h) |
+| --- | --- | --- | --- | --- |
+| 5K commits/day (10 files each) | 11.1 h/day | 5.3 h/day | 174 hours | **$261** |
+| 15K commits/day | 33.3 h/day | 15.8 h/day | 525 hours | **$788** |
+| 50K commits/day | 111 h/day | 52.8 h/day | 1,750 hours | **$2,625** |
 
 ### Seatless usage pricing
 
-Usage tier is pay-as-you-go with no seat charges: $0.50/1K API calls, $0.10/GB storage/mo, $0.10/GB transfer. Unlimited repos. Because there are no per-user fees, automation-heavy orgs with dozens of service accounts pay only for actual git operations.
+Usage tier is pay-as-you-go with no seat charges. Automation-heavy orgs with dozens of service accounts pay only for actual git operations.
 
-| Org footprint | Legacy seat model* | Coregit usage tier** | Monthly savings |
+| Org footprint | GitHub Team | Coregit usage | Monthly savings |
 | --- | --- | --- | --- |
-| 40 repos, 20 humans + 20 agents, ~100 API calls + 50 MB storage + 100 MB transfer per repo | 40 seats x $4 = $160 | ~$65 | ~$95 |
-| 100 repos, 8 engineers + 52 bots, same per-repo usage | 60 seats x $4 = $240 | ~$65 | ~$175 |
+| 40 repos, 20 humans + 20 agents | 40 seats × $4 = $160 | ~$65 | **~$95** |
+| 100 repos, 8 engineers + 52 bots | 60 seats × $4 = $240 | ~$65 | **~$175** |
 
-<small>*GitHub Team public price of $4/seat/month. Actual competitor pricing may vary. **Coregit estimate: ~100 API calls, 50 MB storage, 100 MB transfer per repo/month.</small>
+<small>GitHub Team at $4/seat/month. Coregit: $0.50/1K API calls, $0.10/GB storage/mo, $0.10/GB transfer. Unlimited repos.</small>
 
-### Zero egress and serverless infra
+### Zero egress
 
-Coregit runs entirely on Cloudflare Workers and R2, so outbound bandwidth from the API and storage layer carries zero egress cost. A team mirroring 3 TB of clones or pulls per month would spend ~$270 on AWS S3 egress ($0.09/GB) but $0 on Coregit.
+Coregit runs on Cloudflare R2 with zero egress costs. A team mirroring 3 TB/month of clones pays ~$270 on AWS S3 egress but $0 on Coregit.
 
-### Combined ROI
+### Rate limits
 
-Even the mid workload (15k 10-file commits/day) yields ~$490/mo in sandbox time savings alone. Add seat savings and avoided egress — **~$540+/month** before counting engineering time saved by snapshots and restore points. The real unlock is throughput: GitHub's 500 writes/hour cap blocks scaling entirely, regardless of cost.
+GitHub: 5,000 requests/hour, 500 writes/hour (content creation). At 13 calls per 10-file commit, you hit the write limit after just 38 commits/hour.
 
-## Benchmarks
+Coregit: 15,000 requests/hour per key, 50,000/hour per org. At 1 call per commit, that's 15,000 commits/hour — **394x more throughput** than GitHub's write limit.
 
-### End-to-end latency snapshot
+## Why GitHub reads are faster
 
-| Operation | Estimate (p50) | Bottleneck |
-| --- | --- | --- |
-| Create repo | ~200 ms | 4 R2 writes + 1 DB insert |
-| API commit (3 files) | ~300 ms | Blob hashing + tree build + CAS ref update |
-| Read file | ~100 ms | 1 R2 read + decompress |
-| List repos | ~50 ms | Single DB query |
-| Clone (under 100 MB) | ~500 ms | In-memory packfile generation |
-| Diff (100 files) | ~800 ms | Full tree walks + blob reads |
+GitHub is a monolith with in-memory caches on one server — auth, repo lookup, and file read happen in the same process with 0 network hops between components. Coregit is a distributed system on Cloudflare Workers where each component (KV cache, R2 storage, Durable Objects, Hyperdrive DB) is a separate network call.
 
-### Microbench results (`npm run test:bench`, Apr 2, 2026)
+For single-operation reads, GitHub's architecture wins. For multi-file writes, Coregit's atomic API wins — the overhead of distributed components is amortized across one call instead of thirteen.
 
-| Test | Scenario | Throughput (ops/s) | Delta |
-| --- | --- | --- | --- |
-| bytesToHex | Lookup table vs Array.from | 4,703,257 vs 724,596 | 6.5x faster |
-| Decompression (1 KB blob) | unzlibSync vs DecompressionStream | 5,450 vs 16,433 | Stream still 3.0x faster (needs revisit) |
-| Decompression (10 KB blob) | unzlibSync vs DecompressionStream | 5,823 vs 16,679 | Stream still 2.9x faster |
-| parseTree | 5 entries vs 50 entries | 476,722 vs 49,647 | Scaling gap 9.6x |
-| parseGitObject | 1 KB vs 10 KB blob | 1,994,568 vs 1,915,748 | ~1.04x delta |
-| sha1 | 1 KB vs 10 KB chunk | 44,859 vs 35,556 | 1.26x delta |
+## How to use these numbers
 
-### How to use these numbers
-
-- The end-to-end table provides the commit, read, and clone baselines to feed into planning models for AI agent throughput.
-- The microbench suite highlights where the current Worker spends CPU time (hex encoding is solved, decompression still needs iteration) so infra owners can focus on the largest multipliers.
-- Pair the request-count savings with usage pricing when sizing customer pitches or internal ROI reviews.
+- **For agent builders:** multiply commit count × time saved to estimate compute savings
+- **For platform teams:** compare rate limits (38 commits/hr on GitHub vs 15,000/hr on Coregit)
+- **For cost modeling:** combine seat savings + compute savings + egress savings
