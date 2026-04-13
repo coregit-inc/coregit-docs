@@ -7,9 +7,11 @@ description: Executive intro, savings math, and benchmark data for Coregit vs Gi
 
 Coregit is a serverless Git hosting platform built for AI agents and automated workflows. One API call commits any number of files — GitHub needs 13+ calls for the same operation. This translates directly to faster agent execution and lower compute costs.
 
-## The key number
+## The key numbers
 
 > **Commit 100 files: Coregit 24s vs GitHub 75s — 3.1x faster. One API call vs one hundred three.**
+
+> **Write throughput: 15,000 commits/hour vs GitHub's 38. That's 394x more capacity.** GitHub's 500 writes/hour rate limit means an AI agent hits the wall after 38 ten-file commits per hour. Coregit handles 15,000 — your agent never waits.
 
 ## Benchmark summary
 
@@ -51,6 +53,8 @@ AI coding agents (Cursor, Claude Code, Codex) spend compute time waiting for git
 | 15K commits/day | 33.3 h/day | 15.8 h/day | 525 hours | **$788** |
 | 50K commits/day | 111 h/day | 52.8 h/day | 1,750 hours | **$2,625** |
 
+<small>$1.50/h based on typical AI coding sandbox pricing (Daytona, E2B, Gitpod-class compute). Your actual cost depends on provider.</small>
+
 ### Seatless usage pricing
 
 Usage tier is pay-as-you-go with no seat charges. Automation-heavy orgs with dozens of service accounts pay only for actual git operations.
@@ -72,11 +76,13 @@ GitHub: 5,000 requests/hour, 500 writes/hour (content creation). At 13 calls per
 
 Coregit: 15,000 requests/hour per key, 50,000/hour per org. At 1 call per commit, that's 15,000 commits/hour — **394x more throughput** than GitHub's write limit.
 
-## Why GitHub reads are faster
+## Why GitHub reads are faster (for now)
 
 GitHub is a monolith with in-memory caches on one server — auth, repo lookup, and file read happen in the same process with 0 network hops between components. Coregit is a distributed system on Cloudflare Workers where each component (KV cache, R2 storage, Durable Objects, Hyperdrive DB) is a separate network call.
 
-For single-operation reads, GitHub's architecture wins. For multi-file writes, Coregit's atomic API wins — the overhead of distributed components is amortized across one call instead of thirteen.
+For single-operation reads, GitHub's architecture wins by ~1.1x. For multi-file writes, Coregit's atomic API wins by 2-3x — the overhead of distributed components is amortized across one call instead of thirteen.
+
+**Roadmap:** The Session API (Zero-Wait Protocol) eliminates per-request auth overhead for agents using sessions. With the session hot layer, reads from recently-written data serve from Durable Object storage (~2ms) instead of R2 (~200ms). Warm list tree and list commits already beat GitHub today.
 
 ## How to use these numbers
 
