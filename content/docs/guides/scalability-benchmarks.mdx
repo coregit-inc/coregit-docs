@@ -42,11 +42,11 @@ Coregit uses KV-cached flat tree maps and commit lists. First request populates 
 
 | Operation | GitHub | Coregit | Winner |
 | --- | --- | --- | --- |
-| Create repo | 2,527 ms | 3,745 ms | GitHub 1.5x |
-| Create branch | 755 ms | 2,174 ms | GitHub 2.9x |
-| Diff branches | 1,030 ms | 2,758 ms | GitHub 2.7x |
+| Create repo | 625 ms | 2,534 ms | GitHub 4.1x |
+| Create branch | 689 ms | 2,209 ms | GitHub 3.2x |
+| Diff branches | 648 ms | 705 ms | **Coregit ~1:1** |
 
-GitHub's single-op operations are faster due to monolith architecture with in-memory caches (0 network hops between components). Coregit is a distributed system on Cloudflare Workers where each component (KV, R2, Durable Objects, Hyperdrive) is a separate network call.
+GitHub's single-op operations are faster due to monolith architecture with in-memory caches (0 network hops between components). Coregit is a distributed system on Cloudflare Workers where each component (KV, R2, Durable Objects, Hyperdrive) is a separate network call. Diff performance was optimized with shared tree caching — subtrees common to both branches are fetched once.
 
 ## Architecture
 
@@ -86,7 +86,7 @@ ms() { python3 -c "import time; print(int(time.time()*1000))"; }
 t1=$(ms); <operation>; t2=$(ms); echo "$((t2-t1)) ms"
 ```
 
-GitHub operations use `gh api` CLI. Coregit operations use `cgt` CLI. Both authenticate with API keys (private repos).
+Write and read benchmarks use `gh api` / `cgt` CLI. Other operations (create repo, branch, diff) use `curl` for both GitHub and Coregit REST APIs. All authenticate with API keys (private repos).
 
 For multi-file commits on GitHub, each blob is created with a separate `POST /repos/:owner/:repo/git/blobs` call, followed by tree creation, commit creation, and ref update — matching the minimum required API calls.
 
