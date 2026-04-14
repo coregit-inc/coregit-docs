@@ -1,36 +1,51 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+<p align="center">
+  <a href="https://docs.coregit.dev"><img src="https://img.shields.io/badge/Live-docs.coregit.dev-green" alt="Docs" /></a>
+  <a href="https://github.com/coregit-inc/coregit-docs/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue" alt="License" /></a>
+</p>
 
-## Getting Started
+# Coregit Docs
 
-First, run the development server:ewfwfe
+Documentation for [Coregit](https://github.com/coregit-inc/coregit-api) — the serverless Git API for AI agents.
+
+Live at **[docs.coregit.dev](https://docs.coregit.dev)**
+
+## What's Inside
+
+| Section | Pages | Covers |
+|---------|-------|--------|
+| **Getting Started** | 4 | Quick start, authentication, agent onboarding, TypeScript SDK |
+| **API Reference** | 23 | Repos, commits, branches, search, semantic search, code graph, LFS, webhooks, and more |
+| **Git Protocol** | 4 | Clone, fetch, push, LFS over Smart HTTP |
+| **Guides** | 8 | AI agent workflows, security, custom domains, LLM Wiki, benchmarks |
+
+## Stack
+
+- [Next.js 16](https://nextjs.org) + React 19
+- [Fumadocs](https://fumadocs.vercel.app) for documentation UI
+- [Tailwind CSS 4](https://tailwindcss.com)
+- MDX content in `content/docs/`
+
+## Local Development
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Contributing
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Edit or add MDX files in `content/docs/`. The site rebuilds automatically in dev mode.
 
-## Learn More
+```
+content/docs/
+  getting-started/    # Onboarding & setup
+  api-reference/      # REST API endpoints
+  git-protocol/       # Git Smart HTTP
+  guides/             # Workflows & best practices
+```
 
-To learn more about Next.js, take a look at the following resources:
+## License
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+[AGPL-3.0](LICENSE) — same as [coregit-api](https://github.com/coregit-inc/coregit-api).
