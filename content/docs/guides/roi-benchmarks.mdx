@@ -11,7 +11,7 @@ Coregit is a serverless Git hosting platform built for AI agents and automated w
 
 > **Commit 100 files: Coregit 19.8s vs GitHub 72.1s — 3.6x faster. One API call vs one hundred five.**
 
-> **Write throughput: 15,000 commits/hour vs GitHub's ~370. That's 40x more capacity.** GitHub's secondary rate limit (80 content-creating requests/minute ≈ 4,800/hour) means an AI agent hits the wall after ~370 ten-file commits per hour (13 calls each). Coregit handles 15,000 — your agent never waits.
+> **Write throughput: 15,000 commits/hour vs GitHub's 38. That's 394x more capacity.** GitHub's 500 writes/hour rate limit means an AI agent hits the wall after 38 ten-file commits per hour. Coregit handles 15,000 — your agent never waits.
 
 ## Benchmark summary
 
@@ -74,9 +74,9 @@ Coregit runs on Cloudflare R2 with zero egress costs. A team mirroring 3 TB/mont
 
 ### Rate limits
 
-GitHub: 5,000 requests/hour primary limit, plus a secondary rate limit of 80 content-creating requests/minute (~4,800/hour). At 13 calls per 10-file commit, that's ~370 commits/hour before you hit the ceiling.
+GitHub: 5,000 requests/hour, 500 writes/hour (content creation). At 13 calls per 10-file commit, you hit the write limit after just 38 commits/hour.
 
-Coregit: 15,000 requests/hour per key, 50,000/hour per org. At 1 call per commit, that's 15,000 commits/hour — **~40x more throughput** than GitHub.
+Coregit: 15,000 requests/hour per key, 50,000/hour per org. At 1 call per commit, that's 15,000 commits/hour — **394x more throughput** than GitHub's write limit.
 
 ## Why GitHub reads are faster (for now)
 
@@ -89,5 +89,5 @@ For single-file reads, GitHub's architecture wins by ~1.1x. For multi-file write
 ## How to use these numbers
 
 - **For agent builders:** multiply commit count × time saved to estimate compute savings
-- **For platform teams:** compare rate limits (~370 commits/hr on GitHub vs 15,000/hr on Coregit)
+- **For platform teams:** compare rate limits (38 commits/hr on GitHub vs 15,000/hr on Coregit)
 - **For cost modeling:** combine seat savings + compute savings + egress savings
