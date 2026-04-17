@@ -7,7 +7,7 @@ description: GitHub vs Coregit API latency benchmarks with reproducible test met
 
 Real-world benchmarks comparing GitHub REST API and Coregit API for identical operations. All tests run from the same machine, same network, same time window.
 
-**Test conditions:** Kazakhstan → US-East, private repos with authentication, April 2026.
+**Test conditions:** Kazakhstan → CF edge / US-East, private repos with authentication, April 2026. 10 iterations + 2 warmup per operation, median (p50) reported.
 
 ### Write Operations
 
@@ -15,38 +15,42 @@ Coregit's atomic multi-file commit is the key differentiator. GitHub requires N+
 
 | Operation | GitHub | Coregit | API Calls | Winner |
 | --- | --- | --- | --- | --- |
-| **Commit 1 file** | 2,217 ms | **2,148 ms** | 4 vs 1 | **Coregit ~1:1** |
-| **Commit 5 files** | 4,829 ms | **3,456 ms** | 8 vs 1 | **Coregit 1.4x** |
+| **Commit 1 file** | 610 ms | **1,195 ms** | 1¹ vs 1 | GitHub 2.0x |
+| **Commit 5 files** | 4,829 ms | **2,542 ms** | 8 vs 1 | **Coregit 1.9x** |
 | **Commit 10 files** | 8,387 ms | **4,183 ms** | 13 vs 1 | **Coregit 2.0x** |
 | **Commit 100 files** | 72,064 ms | **19,769 ms** | 105 vs 1 | **Coregit 3.6x** |
 
-Coregit's advantage grows with file count:
+<small>¹ GitHub single-file commit uses the Contents API (`PUT /contents/:path`) — a simplified 1-call endpoint. Multi-file commits require the full Git Data API (N+3 calls).</small>
 
-- **1 file:** ~parity (single API call vs 4, but Coregit does more server-side)
-- **5 files:** 1.4x faster
-- **10 files:** 2.0x faster
-- **100 files:** 3.6x faster
+Coregit's advantage grows with file count because GitHub's per-blob API calls accumulate linearly:
+
+- **1 file:** GitHub faster (Contents API shortcut, less server-side work)
+- **5 files:** Coregit 1.9x faster
+- **10 files:** Coregit 2.0x faster
+- **100 files:** Coregit 3.6x faster
 - **1,000 files (projected):** ~10x+ faster
 
 ### Read Operations
 
 | Operation | GitHub | Coregit | Winner |
 | --- | --- | --- | --- |
-| Read file (warm) | 735 ms | 800 ms | GitHub 1.1x |
-| **List tree** | 797 ms | **752 ms** | **Coregit 1.1x** |
-| List commits (warm) | 829 ms | 474 ms | **Coregit 1.7x** |
+| **Get repo info** | 426 ms | **219 ms** | **Coregit 1.9x** |
+| Read file | 411 ms | 487 ms | GitHub 1.2x |
+| **List tree** | 1,290 ms | **535 ms** | **Coregit 2.4x** |
+| **List commits (20)** | 397 ms | **240 ms** | **Coregit 1.7x** |
 
-Coregit uses KV-cached flat tree maps and commit lists. First request populates the cache; all subsequent requests hit cache.
+Coregit uses KV-cached flat tree maps and commit lists. First request populates the cache; all subsequent requests hit cache. Tree listing is 2.4x faster because Coregit resolves it in 1 call — GitHub needs 3 (ref → commit → tree).
 
 ### Other Operations
 
 | Operation | GitHub | Coregit | Winner |
 | --- | --- | --- | --- |
-| Create repo | 713 ms | 2,500 ms | GitHub 3.5x |
-| Create branch | 689 ms | 1,794 ms | GitHub 2.6x |
-| Diff branches (warm) | 738 ms | 752 ms | **~Parity** |
+| Create branch | 832 ms | 1,562 ms | GitHub 1.9x |
+| List branches | 420 ms | 758 ms | GitHub 1.8x |
+| Diff branches (warm) | — | 544 ms | — |
+| Compare (warm) | — | 644 ms | — |
 
-GitHub's single-op operations are faster due to monolith architecture with in-memory caches (0 network hops between components). Coregit is a distributed system on Cloudflare Workers where each component (KV, R2, Durable Objects, Hyperdrive) is a separate network call. Diff performance was optimized with shared tree caching — subtrees common to both branches are fetched once.
+GitHub's single-op write operations are faster due to monolith architecture with in-memory caches (0 network hops between components). Coregit is a distributed system on Cloudflare Workers where each component (KV, R2, Durable Objects, Hyperdrive) is a separate network call.
 
 ## Architecture
 

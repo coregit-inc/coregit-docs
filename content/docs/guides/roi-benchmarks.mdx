@@ -15,18 +15,20 @@ Coregit is a serverless Git hosting platform built for AI agents and automated w
 
 ## Benchmark summary
 
-Measured April 2026, Kazakhstan → US-East, private repos with authentication.
+Measured April 2026, Kazakhstan → CF edge / US-East, private repos with authentication. 10 iterations, median reported.
 
 | Operation | GitHub | Coregit | Faster | API Calls |
 | --- | --- | --- | --- | --- |
-| Commit 1 file | 2,217 ms | **2,148 ms** | **~Parity** | 4 vs 1 |
-| Commit 5 files | 4,829 ms | **3,456 ms** | **Coregit 1.4x** | 8 vs 1 |
+| Commit 1 file | 610 ms | 1,195 ms | GitHub 2.0x | 1¹ vs 1 |
+| Commit 5 files | 4,829 ms | **2,542 ms** | **Coregit 1.9x** | 8 vs 1 |
 | Commit 10 files | 8,387 ms | **4,183 ms** | **Coregit 2.0x** | 13 vs 1 |
 | Commit 100 files | 72,064 ms | **19,769 ms** | **Coregit 3.6x** | 105 vs 1 |
-| Read file (warm) | 735 ms | 800 ms | GitHub 1.1x | 1 vs 1 |
-| List tree | 797 ms | **752 ms** | **Coregit 1.1x** | 1 vs 1 |
-| List commits (warm) | 829 ms | **474 ms** | **Coregit 1.7x** | 1 vs 1 |
-| Diff branches (warm) | 738 ms | 752 ms | **~Parity** | 1 vs 1 |
+| Get repo info | 426 ms | **219 ms** | **Coregit 1.9x** | 1 vs 1 |
+| Read file | 411 ms | 487 ms | GitHub 1.2x | 1 vs 1 |
+| List tree | 1,290 ms | **535 ms** | **Coregit 2.4x** | 3 vs 1 |
+| List commits (20) | 397 ms | **240 ms** | **Coregit 1.7x** | 1 vs 1 |
+
+<small>¹ GitHub single-file commit uses the Contents API shortcut (1 call). Multi-file commits require the Git Data API (N+3 calls).</small>
 
 Full benchmark details: [Scalability Benchmarks](/docs/guides/scalability-benchmarks)
 
@@ -43,7 +45,7 @@ GitHub needs N+3 sequential API calls for an N-file commit (N blob creates + get
 | 10,000 | 130,000 | 10,000 | ~12 hours |
 | 50,000 | 650,000 | 50,000 | ~58 hours |
 
-<small>Based on measured latency: GitHub ~8.4s per 10-file commit, Coregit ~4.2s. Time saved = (8.4s - 4.2s) × commits/day.</small>
+<small>Based on measured latency: GitHub ~8.4s per 10-file commit (13 API calls), Coregit ~4.2s (1 API call). Time saved = (8.4s - 4.2s) × commits/day.</small>
 
 ### Agent compute savings
 
@@ -78,13 +80,15 @@ GitHub: 5,000 requests/hour, 500 writes/hour (content creation). At 13 calls per
 
 Coregit: 15,000 requests/hour per key, 50,000/hour per org. At 1 call per commit, that's 15,000 commits/hour — **394x more throughput** than GitHub's write limit.
 
-## Why GitHub reads are faster (for now)
+## Where each platform wins
 
-GitHub is a monolith with in-memory caches on one server — auth, repo lookup, and file read happen in the same process with 0 network hops between components. Coregit is a distributed system on Cloudflare Workers where each component (KV cache, R2 storage, Durable Objects, Hyperdrive DB) is a separate network call.
+**Coregit wins on reads that aggregate data** — repo info (1.9x), tree listing (2.4x), commit history (1.7x). These benefit from KV-cached flat tree maps and commit lists on Cloudflare's edge network.
 
-For single-file reads, GitHub's architecture wins by ~1.1x. For multi-file writes, Coregit's atomic API wins by 2-3.6x — the overhead of distributed components is amortized across one call instead of 105. Diff and list operations are now at parity or faster thanks to KV caching and shared tree resolution.
+**GitHub wins on single-file reads** (1.2x) and single-op writes like create branch (1.9x). GitHub is a monolith with in-memory caches — auth, repo lookup, and file read happen in the same process with 0 network hops. Coregit is a distributed system on Cloudflare Workers where each component (KV, R2, Durable Objects, Hyperdrive) is a separate network call.
 
-**Roadmap:** The Session API (Zero-Wait Protocol) eliminates per-request auth overhead for agents using sessions. With the session hot layer, reads from recently-written data serve from Durable Object storage (~2ms) instead of R2 (~200ms). Warm list tree and list commits already beat GitHub today.
+**For multi-file writes, Coregit wins by 2-3.6x** — the overhead of distributed components is amortized across one atomic call instead of GitHub's 105 sequential API calls.
+
+**Roadmap:** The Session API (Zero-Wait Protocol) eliminates per-request auth overhead for agents using sessions. With the session hot layer, reads from recently-written data serve from Durable Object storage (~2ms) instead of R2 (~200ms).
 
 ## How to use these numbers
 
