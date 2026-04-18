@@ -44,9 +44,11 @@ Each entry in `changes` describes a file operation.
 | `path` | Yes | File path (no traversal) |
 | `content` | No | Full file content (for create/modify) |
 | `encoding` | No | `utf-8` (default) or `base64` |
-| `action` | No | `"create"` (default), `"edit"`, `"delete"`, or `"rename"` |
+| `action` | No | `"create"` (default), `"edit"`, `"delete"`, `"rename"`, or `"lazy_edit"` |
 | `edits` | No | Array of surgical edits (required when `action: "edit"`) |
 | `new_path` | No | New file path (required when `action: "rename"`) |
+| `edit_snippet` | No | Lazy edit snippet (required when `action: "lazy_edit"`) |
+| `instruction` | No | Single-line hint that disambiguates a lazy edit (optional) |
 
 ### Surgical Edits
 
@@ -106,6 +108,47 @@ When `action: "edit"`, you can make precise changes without sending the entire f
 ```
 
 String edits are applied first, then range edits (bottom-to-top to preserve line numbers). Returns `422` if `old_string` is not found or matches multiple locations.
+
+### Lazy Edits
+
+<Callout type="info">
+  Lazy edits require a **paid plan**. Free-tier orgs get `402 Payment Required`. Billed per output token at **$1.32 / 1M tokens** — roughly 10% above upstream LLM cost.
+</Callout>
+
+`action: "lazy_edit"` accepts an abbreviated snippet with `// ... existing code ...` markers and lets Coregit's Fast Apply pipeline merge it into the current file server-side. Your agent produces ~200 tokens instead of rewriting the whole 5 000-token file; Coregit commits the merged full content as a regular blob. One round-trip, atomic with the rest of the commit.
+
+```json
+{
+  "path": "src/auth.ts",
+  "action": "lazy_edit",
+  "instruction": "Add user null check before session creation",
+  "edit_snippet": "// ... existing code ...\n  const user = db.find(email);\n  if (!user) throw new Error(\"User not found\");\n  const session = createSession(user);\n// ... existing code ..."
+}
+```
+
+**Snippet conventions:**
+
+- Use language-appropriate comment syntax for markers: `// ... existing code ...` (C-family, JS/TS), `# ... existing code ...` (Python/Ruby), `<!-- ... existing code ... -->` (HTML/XML).
+- Keep unchanged spans behind markers — only write the bytes you changed.
+- Preserve indentation exactly as it should appear in the final file.
+- `instruction` (optional, single line) disambiguates when the snippet could match multiple places (e.g. *"Replace the retry logic in the outer loop, not the inner one"*).
+
+**Limits:**
+
+- `edit_snippet` ≤ **200 KB** (~50k tokens input, well under upstream context window)
+- Max **50** `lazy_edit` changes per commit (soft cap)
+- Per-edit timeout **15 s**
+
+**Error modes:**
+
+| Status | Meaning |
+|--------|---------|
+| `402` | Free-tier org — upgrade to use `lazy_edit` |
+| `404` | File doesn't exist at `parent_sha` |
+| `502` | Upstream merge failed (retry, no billing on failure) |
+| `503` | `lazy_edit` not configured on this deployment |
+
+**Billing:** counted only after the commit succeeds. Failed merges and CAS conflicts cost nothing. Usage appears in `/v1/usage` as event type `lazy_edit_tokens` and against the `coregit.v2.lazy_edit_tokens` meter in billing.
 
 ### Fields
 

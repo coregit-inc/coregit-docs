@@ -14,7 +14,7 @@ Live at **[docs.coregit.dev](https://docs.coregit.dev)**
 | Section | Pages | Covers |
 |---------|-------|--------|
 | **Getting Started** | 4 | Quick start, authentication, agent onboarding, TypeScript SDK |
-| **API Reference** | 23 | Repos, commits, branches, search, semantic search, code graph, LFS, webhooks, and more |
+| **API Reference** | 24 | Repos, commits (incl. lazy edits), branches, search, semantic search, agentic search, code graph, LFS, webhooks, and more |
 | **Git Protocol** | 4 | Clone, fetch, push, LFS over Smart HTTP |
 | **Guides** | 8 | AI agent workflows, security, custom domains, LLM Wiki, benchmarks |
 

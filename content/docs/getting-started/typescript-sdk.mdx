@@ -197,6 +197,19 @@ const { data: commit } = await git.commits.create("my-repo", {
       ],
     },
 
+    // Lazy edit — send only the changed span with "// ... existing code ..." markers (paid, server merges via Fast Apply)
+    {
+      path: "src/auth.ts",
+      action: "lazy_edit",
+      instruction: "Add user null check before session creation",
+      edit_snippet:
+        "// ... existing code ...\n" +
+        "  const user = db.find(email);\n" +
+        "  if (!user) throw new Error(\"User not found\");\n" +
+        "  const session = createSession(user);\n" +
+        "// ... existing code ...",
+    },
+
     // Binary file (base64)
     { path: "logo.png", content: base64Data, encoding: "base64" },
 
@@ -210,6 +223,36 @@ const { data: commit } = await git.commits.create("my-repo", {
 
 console.log(commit.sha); // "7f3b..."
 ```
+
+### Lazy Edits
+
+`action: "lazy_edit"` lets your agent send only the changed bytes (with `// ... existing code ...` markers) instead of the full file. Coregit merges server-side via Fast Apply and commits the result as a regular blob — one atomic commit, whether you mix lazy edits with plain `content` writes or not.
+
+```typescript
+const { data, error } = await git.commits.create("my-repo", {
+  branch: "main",
+  message: "fix: null-check user",
+  author: { name: "AI Agent", email: "agent@example.com" },
+  changes: [
+    {
+      path: "src/auth.ts",
+      action: "lazy_edit",
+      instruction: "Add user null check before session creation", // optional, disambiguates ambiguous merges
+      edit_snippet:
+        "// ... existing code ...\n" +
+        "  if (!user) throw new Error(\"User not found\");\n" +
+        "// ... existing code ...",
+    },
+  ],
+});
+
+if (error?.status === 402) {
+  // Free-tier — upgrade required
+  console.log("Upgrade at", error.message);
+}
+```
+
+**Why:** turns a 5 000-token file rewrite into a ~200-token snippet from your agent's LLM — roughly **50× fewer output tokens**. Billed only on success at $1.32 / 1M merge tokens. See [Commits → Lazy Edits](/docs/api-reference/commits#lazy-edits) for snippet conventions, limits, and error codes.
 
 ### Conflict Detection
 
@@ -529,6 +572,76 @@ const { data } = await git.search.query({
   max_results: 200,
 });
 ```
+
+## Agentic Search
+
+Ask a natural-language question about your codebase. A model runs a short grep/read/list loop server-side against a materialized snapshot of the repo and comes back with **an answer plus file locations** — not a ranked dump of chunks. Two modes: buffered JSON or streaming SSE.
+
+```typescript
+// Buffered — one JSON response at the end
+const { data, error } = await git.search.agentic("my-repo", {
+  q: "Where is JWT verification implemented?",
+  ref: "main",           // optional — default branch
+  max_turns: 6,          // optional — default 6, hard cap 10
+  structure_depth: 2,    // optional — initial <repo_structure> depth, default 2
+});
+
+if (error) {
+  if (error.status === 402) console.log("Paid plan required");
+  throw new Error(error.message);
+}
+
+console.log(data.answer);
+// "JWT verification happens in src/auth/middleware.ts, line 42 (verifyJWT function)."
+
+for (const loc of data.locations) {
+  console.log(`  ${loc.path}:${loc.start_line}-${loc.end_line}`);
+}
+
+console.log(`${data.total_turns} turns, ${data.total_tokens} tokens, commit ${data.commit_sha}`);
+```
+
+### Streaming
+
+Use `agenticStream` to render per-turn progress. The callback receives a discriminated union of events; the promise resolves with the final `finish` payload (or `null` if the stream errored).
+
+```typescript
+const result = await git.search.agenticStream(
+  "my-repo",
+  { q: "Find the rate limiter implementation", ref: "main" },
+  (event) => {
+    switch (event.type) {
+      case "start":
+        console.log(`materialized ${event.commit_sha.slice(0, 7)} in ${event.workspace_ms}ms`);
+        break;
+      case "turn_start":
+        console.log(`[turn ${event.turn}]`);
+        break;
+      case "tool_call":
+        console.log(`  → ${event.tool}(${JSON.stringify(event.args)})`);
+        break;
+      case "tool_result":
+        console.log(`  ← ${event.content.slice(0, 100)}${event.truncated ? "…" : ""}`);
+        break;
+      case "turn_end":
+        console.log(`  tokens in=${event.prompt_tokens} out=${event.completion_tokens}`);
+        break;
+      case "error":
+        console.error(`[error] ${event.code}: ${event.message}`);
+        break;
+    }
+  }
+);
+
+if (result) {
+  console.log("Final answer:", result.answer);
+  console.log("Locations:", result.locations);
+}
+```
+
+<Callout type="info">
+Paid-tier only. Billed per upstream output token at **$1.56 / 1M** (covers multi-turn orchestration). Typical short search runs 3–4 turns at a few hundred tokens — fractions of a cent. Full details in [Agentic Search API](/docs/api-reference/agentic-search).
+</Callout>
 
 ## Connections
 

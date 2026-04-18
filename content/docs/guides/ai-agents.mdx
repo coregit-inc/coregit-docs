@@ -133,6 +133,72 @@ The user (or CI) clones with standard Git:
 git clone https://myorg:cgk_live_KEY@api.coregit.dev/myorg/agent-output.git
 ```
 
+## Lazy Edits — Stop Rewriting Whole Files
+
+Once a file exists, rewriting it to change three lines is wasteful: your agent burns 5 000 output tokens to regenerate 4 997 that were already correct. `action: "lazy_edit"` lets the agent send only the **diff in its head**, marked with `// ... existing code ...` placeholders, and Coregit merges it server-side inside the same atomic commit.
+
+```javascript
+await fetch('https://api.coregit.dev/v1/repos/agent-output/commits', {
+  method: 'POST',
+  headers: {
+    'x-api-key': process.env.COREGIT_API_KEY,
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({
+    branch: 'main',
+    message: 'fix: null-check user before session',
+    parent_sha: currentHead,
+    changes: [
+      {
+        path: 'src/auth.ts',
+        action: 'lazy_edit',
+        instruction: 'Add user null check before session creation',
+        edit_snippet:
+          '// ... existing code ...\n' +
+          '  const user = db.find(email);\n' +
+          '  if (!user) throw new Error("User not found");\n' +
+          '  const session = createSession(user);\n' +
+          '// ... existing code ...',
+      },
+    ],
+  }),
+});
+```
+
+**When to use it** — any edit where > 80% of the file is unchanged. For a 1-line fix in a 5 000-token file, you're sending ~100 tokens instead of 5 000 — **50× fewer output tokens from your agent's LLM**, which is usually the single biggest cost in an agent loop.
+
+**Full reference:** [Commits → Lazy Edits](/docs/api-reference/commits#lazy-edits).
+
+## Finding Code with Agentic Search
+
+Before you edit a file, your agent usually needs to locate the right spot. Instead of running N shell commands in a sandbox to grep/read/list, hand the question to Coregit:
+
+```javascript
+const res = await fetch(
+  'https://api.coregit.dev/v1/repos/agent-output/agentic-search',
+  {
+    method: 'POST',
+    headers: {
+      'x-api-key': process.env.COREGIT_API_KEY,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      q: 'Where is the JWT verification middleware and what does it check?',
+      ref: 'main',
+    }),
+  }
+);
+const { answer, locations } = await res.json();
+// answer:    "JWT verification lives in src/auth/middleware.ts, line 42..."
+// locations: [{ path: "src/auth/middleware.ts", start_line: 42, end_line: 58 }]
+```
+
+Coregit materializes the repo at `ref`, runs an upstream model through a 3–6 step grep/read/glob loop inside a sandboxed filesystem, and returns an answer + file pointers. Your agent gets one clean fact instead of 30 tool calls.
+
+Set `stream: true` to receive per-turn SSE events (`turn_start`, `tool_call`, `tool_result`, `finish`) if you want to show progress.
+
+**Full reference:** [Agentic Search](/docs/api-reference/agentic-search).
+
 ## Conflict Detection
 
 When multiple agents work on the same repo, use `parent_sha` to detect conflicts:

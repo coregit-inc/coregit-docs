@@ -1,0 +1,214 @@
+---
+title: Agentic Search
+description: Multi-turn agentic code search with optional streaming progress.
+---
+
+Agentic search answers a natural-language question by running a short **multi-turn loop** against a materialized snapshot of your repo at a specific commit. Each turn, an upstream model picks a tool (`grep_search`, `read`, `list_directory`, `glob`), Coregit executes it inside a sandboxed filesystem built from the commit, and the model iterates until it calls `finish`.
+
+Unlike `/semantic-search` (which returns ranked chunks), agentic search returns **an answer plus file locations** — the caller gets "where and how", not a dump of candidates.
+
+<Callout type="info">
+  Paid plan only. Free-tier orgs get `402`. Billed per upstream output token at **$1.56 / 1M tokens** (covers 6× subrequests + CPU time — the multi-turn orchestration is the expensive part, not the model).
+</Callout>
+
+## Request
+
+```http
+POST /v1/repos/:slug/agentic-search
+POST /v1/repos/:namespace/:slug/agentic-search
+```
+
+**Permission:** Read access required.
+
+```json
+{
+  "q": "Where is JWT verification implemented?",
+  "ref": "main",
+  "max_turns": 6,
+  "structure_depth": 2,
+  "stream": false
+}
+```
+
+### Fields
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `q` | Yes | Natural-language query (max 4 000 chars) |
+| `ref` | No | Branch / tag / SHA (default: repo's default branch) |
+| `max_turns` | No | Max agent turns before forced finish (default `6`, hard cap `10`) |
+| `structure_depth` | No | Depth of the initial directory listing shown to the model (default `2`, max `4`) |
+| `stream` | No | `false` (default) returns JSON once finished. `true` returns SSE with per-turn progress. |
+
+## Response — Non-Streaming (`stream: false`)
+
+**`200 OK`** — `Content-Type: application/json`
+
+```json
+{
+  "answer": "JWT verification happens in src/auth/middleware.ts, line 42 (verifyJWT function).",
+  "locations": [
+    { "path": "src/auth/middleware.ts", "start_line": 42, "end_line": 58 },
+    { "path": "src/auth/jwt.ts", "start_line": 1, "end_line": 25 }
+  ],
+  "total_turns": 4,
+  "total_tokens": 286,
+  "ref": "main",
+  "commit_sha": "460c36eb28c301e31cda238af8b01c077e53b816"
+}
+```
+
+### Response Fields
+
+| Field | Description |
+|-------|-------------|
+| `answer` | Natural-language summary. Falls back to `"Found in: <paths>"` when the model omits a prose answer. |
+| `locations` | Array of `{path, start_line, end_line}`. Line ranges are `0` when the model returns file hits without ranges. |
+| `total_turns` | Number of agent turns actually executed (≤ `max_turns`) |
+| `total_tokens` | Sum of `completion_tokens` across all turns — this is the number you're billed on. |
+| `ref` / `commit_sha` | Exact commit the search ran against (important for reproducibility — snapshots change over time, SHAs don't). |
+
+## Response — Streaming (`stream: true`)
+
+**`200 OK`** — `Content-Type: text/event-stream`
+
+Events come as `data: <json>\n\n`. Types:
+
+| `type` | Emitted | Payload |
+|--------|---------|---------|
+| `start` | Workspace materialized | `{ ref, commit_sha, workspace_ms }` |
+| `turn_start` | New agent turn begins | `{ turn }` |
+| `tool_call` | Agent requested a tool | `{ turn, call_id, tool, args }` |
+| `tool_result` | Tool executed locally | `{ turn, call_id, content, truncated }` |
+| `turn_end` | Turn closed with usage stats | `{ turn, prompt_tokens, completion_tokens }` |
+| `finish` | Agent produced final answer | `{ answer, locations, total_turns, total_tokens }` |
+| `error` | Loop aborted | `{ code, message, turn? }` |
+
+Tool results are truncated to **8 KB** before being sent to the model (and the client); `truncated: true` means data was cut.
+
+### Example Stream
+
+```
+data: {"type":"start","ref":"main","commit_sha":"460c36e...","workspace_ms":304}
+
+data: {"type":"turn_start","turn":1}
+
+data: {"type":"tool_call","turn":1,"call_id":"call_x","tool":"grep_search","args":{"pattern":"verifyJWT","path":"src"}}
+
+data: {"type":"tool_result","turn":1,"call_id":"call_x","content":"src/auth/middleware.ts:42:  const token = verifyJWT(req.headers...","truncated":false}
+
+data: {"type":"turn_end","turn":1,"prompt_tokens":1201,"completion_tokens":38}
+
+data: {"type":"turn_start","turn":2}
+
+data: {"type":"tool_call","turn":2,"call_id":"call_y","tool":"read","args":{"path":"src/auth/middleware.ts","start_line":35,"end_line":65}}
+
+data: {"type":"tool_result","turn":2,"call_id":"call_y","content":"export function authMiddleware(...)...","truncated":false}
+
+data: {"type":"turn_end","turn":2,"prompt_tokens":1340,"completion_tokens":24}
+
+data: {"type":"finish","answer":"JWT verification happens in src/auth/middleware.ts...","locations":[{"path":"src/auth/middleware.ts","start_line":42,"end_line":58}],"total_turns":2,"total_tokens":62}
+```
+
+## Available Tools (Built-In)
+
+The agent has five built-in tools. You don't pass a `tools` list — Coregit handles tool execution server-side against a sandboxed filesystem rooted at the target commit.
+
+| Tool | What it does | Backed by |
+|------|--------------|-----------|
+| `grep_search` | Regex search across files (`pattern`, optional `path`, `include_pattern`, `case_sensitive`, `output_context_lines`) | `grep` in a git-backed sandbox |
+| `read` | Read file (optionally `start_line` / `end_line` range) | `sed` / `cat` |
+| `list_directory` | List a directory (path) or run a read-only `ls` / `find` / `tree` command | whitelisted shell |
+| `glob` | Find files by name pattern | `find -name` |
+| `finish` | Terminate with `{answer, locations}` | n/a |
+
+The sandbox is the same `just-bash` + `GitR2FileSystem` layer as [`/exec`](/docs/api-reference/workspace) — a commit-scoped, copy-on-write view materialized from git objects in R2. No shell escapes, no network, no process spawning.
+
+## Limits
+
+| Limit | Value |
+|-------|-------|
+| Max turns | `10` (hard cap — defaults to 6) |
+| Max `q` length | 4 000 chars |
+| Tool result per turn | 8 KB (truncated) |
+| `<repo_structure>` listing | 500 entries (sorted) |
+| Per-turn upstream timeout | 15 s |
+| Per-turn bash timeout | 10 s |
+
+## Error Codes
+
+| Status | Meaning |
+|--------|---------|
+| `402` | Free-tier org — upgrade required |
+| `404` | `ref` doesn't resolve, or the commit isn't found |
+| `502` | Upstream model errored mid-loop (partial turns billed) |
+| `503` | Agentic search not configured on this deployment |
+
+In streaming mode, errors occurring *after* the SSE response opened are emitted as `data: {"type":"error", ...}\n\n` instead of HTTP codes — the stream closes cleanly regardless.
+
+## Billing
+
+Billing is per **upstream completion token** summed across all turns (the same number returned as `total_tokens`). Usage is recorded **only on commit success** — failed Morph turns, timeouts, or client aborts don't charge.
+
+| Meter | Price | Event |
+|-------|-------|-------|
+| `coregit.v2.agentic_search_tokens` | $1.56 / 1M tokens | `agentic_search_tokens` |
+
+Typical short search (~3–4 turns, small repo) costs **~$0.0003**. Long search (10 turns, large repo) caps at ~$0.005.
+
+## SDK
+
+```typescript
+const git = createCoregitClient({ apiKey: "cgk_live_..." });
+
+// Non-streaming
+const { data } = await git.search.agentic("my-app", {
+  q: "Where does user authentication happen?",
+  ref: "main",
+});
+
+console.log(data.answer);
+for (const loc of data.locations) {
+  console.log(`  ${loc.path}:${loc.start_line}-${loc.end_line}`);
+}
+
+// Streaming
+const result = await git.search.agenticStream(
+  "my-app",
+  { q: "Find the rate limiter", ref: "main" },
+  (event) => {
+    if (event.type === "tool_call") {
+      console.log(`  → ${event.tool}(${JSON.stringify(event.args)})`);
+    }
+    if (event.type === "tool_result") {
+      console.log(`  ← ${event.content.slice(0, 120)}`);
+    }
+  }
+);
+
+console.log("Final answer:", result?.answer);
+```
+
+## CLI
+
+```bash
+# Buffered (one JSON response at the end)
+cgt agentic my-app "Where is JWT verification?"
+
+# Stream progress to stderr, final JSON to stdout
+cgt agentic my-app "Where is JWT verification?" --stream
+cgt agentic my-app "Where is JWT verification?" --stream --max-turns 8 --depth 3 --ref feature-branch
+```
+
+## Agentic Search vs Semantic Search
+
+| Feature | `/semantic-search` | `/agentic-search` |
+|---------|--------------------|--------------------|
+| Pre-indexing required | Yes (Voyage embeddings → Pinecone) | No — works against raw git objects |
+| Latency | ~200 ms | ~6 s (multi-turn) |
+| Answers "where" | ✓ (ranked chunks) | ✓ |
+| Answers "how / why" | ✗ | ✓ (synthesized answer + locations) |
+| Reproducibility | Content-addressed vectors | Snapshot at `commit_sha` |
+| Price | Included in API-call meter | $1.56 / 1M tokens |
+
+Use semantic search to triage candidates fast. Use agentic search when you want the model to **think through** what it finds and come back with a direct answer.
