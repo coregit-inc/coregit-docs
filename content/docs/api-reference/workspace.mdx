@@ -3,6 +3,8 @@ title: Workspace
 description: Execute shell commands against a git repository at any point in history with optional auto-commit.
 ---
 
+> **Looking for a higher-level filesystem API?** [`coregit.fs.mount()`](/docs/api-reference/filesystem) wraps these endpoints with `writeFile`/`readFile`/`bash().exec()` and three commit modes for agentic workflows. Use it instead of building your own queue on top of the raw `/exec` endpoints.
+
 ## Execute Command
 
 Run a shell command in the context of a repository. The filesystem is backed by git objects — reads are lazy, writes are held in memory. Optionally commit changes back to git in a single atomic operation.
@@ -38,8 +40,34 @@ POST /v1/repos/:namespace/:slug/exec
 | `commit` | No | Commit changed files after execution (default: `false`) |
 | `commit_message` | If `commit=true` | Commit message |
 | `author` | No | `{ name, email }` for the commit author |
+| `pre_apply_changes` | No | Buffered file changes to layer onto the in-memory overlay **before** the command runs. See [Pre-applied changes](#pre-applied-changes). |
 
 When `ref` is provided, the filesystem is loaded from that specific commit. If you also want to commit changes, you must provide `branch` — it determines which branch receives the new commit.
+
+#### Pre-applied changes
+
+`pre_apply_changes` is the bridge between SDK-side write buffering (e.g. [`fs.mount()`](/docs/api-reference/filesystem) in `manual` / `on-exec` modes) and server-side shell execution. Each entry is applied to the workspace overlay before `bash` starts, so `cat`, `grep`, `npm`, and friends see the buffered writes. Land them in a commit by also setting `commit: true`; otherwise they exist only for the duration of this exec.
+
+```json
+{
+  "command": "cat src/README.md",
+  "pre_apply_changes": [
+    { "path": "src/README.md", "action": "create", "content": "hello world", "encoding": "utf-8" },
+    { "path": "src/old.md",    "action": "delete" },
+    { "path": "src/a.md",      "action": "rename", "new_path": "src/b.md" }
+  ]
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `path` | Yes | Path inside the repo (no leading slash). |
+| `action` | No | `"create"` (default), `"delete"`, or `"rename"`. |
+| `content` | If `action="create"` | File contents. |
+| `encoding` | No | `"utf-8"` (default) or `"base64"`. |
+| `new_path` | If `action="rename"` | New path inside the repo. |
+
+`edit` and `lazy_edit` actions are intentionally **not** supported here — those need server-side merge logic that lives in the [Commits API](/docs/api-reference/commits). Validation caps: max 1000 entries per request, max 10 MB content per file.
 
 ### Response `200`
 
@@ -189,8 +217,19 @@ POST /v1/workspace/exec
 | `commit` | No | Commit changes per repo (default: `false`) |
 | `commit_message` | If `commit=true` | Commit message |
 | `author` | No | `{ name, email }` for commit author |
+| `pre_apply_changes` | No | Same as the single-repo variant — but paths are shaped `/<slug>/<rest>` so the multi-repo router dispatches each change to the right mount. |
 
 Each repo is mounted at `/{slug}/` in the virtual filesystem. The command runs across all of them.
+
+```json
+{
+  "repos": [{ "slug": "frontend" }, { "slug": "backend" }],
+  "command": "cat /frontend/src/README.md",
+  "pre_apply_changes": [
+    { "path": "/frontend/src/README.md", "action": "create", "content": "hi", "encoding": "utf-8" }
+  ]
+}
+```
 
 ### Response `200`
 
@@ -246,4 +285,23 @@ const { data } = await git.workspace.multiExec({
   author: { name: "Agent", email: "agent@example.com" },
 });
 console.log(data.commits); // { frontend: "a1b2...", backend: "d4e5..." }
+
+// Flush SDK-buffered writes alongside the shell command
+const { data } = await git.workspace.multiExec({
+  repos: [{ slug: "frontend" }, { slug: "backend" }],
+  command: "cat /frontend/src/README.md",
+  pre_apply_changes: [
+    {
+      path: "/frontend/src/README.md",
+      action: "create",
+      content: "hello",
+      encoding: "utf-8",
+    },
+  ],
+  commit: true,
+  commit_message: "docs: seed README",
+  author: { name: "Agent", email: "agent@example.com" },
+});
 ```
+
+For most agent workflows you don't construct `pre_apply_changes` by hand — use [`fs.mount()`](/docs/api-reference/filesystem) and the `manual` / `on-exec` commit modes, which build the array for you.

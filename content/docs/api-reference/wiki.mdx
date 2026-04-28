@@ -1,100 +1,35 @@
 ---
 title: LLM Wiki
-description: API endpoints for LLM-maintained knowledge bases — the wiki pattern by Andrej Karpathy, powered by Coregit.
+description: API endpoints for LLM-maintained knowledge bases — pages, sources, history, sandboxes, and document ingestion.
 ---
 
-Build persistent, version-controlled knowledge bases that LLMs maintain for you. Based on the [LLM Wiki pattern](https://github.com/karpathy/llm-wiki) by Andrej Karpathy — where an LLM incrementally builds and maintains a structured wiki from raw sources.
+Build persistent, version-controlled knowledge bases that LLMs maintain for you. Inspired by the [LLM Wiki pattern](https://github.com/karpathy/llm-wiki) by Andrej Karpathy — an LLM incrementally builds and maintains a structured wiki from raw source material.
 
-A Coregit LLM Wiki is a regular repository with a specific structure:
+A Coregit LLM Wiki is a regular repository organized like this:
 
 ```
-wiki.json          # Configuration
-schema.md          # LLM instructions
-index.md           # Content catalog
-log.md             # Activity log
-raw/               # Immutable source documents
-wiki/              # LLM-generated pages
+wiki.json   # Configuration (read by /llms.txt)
+schema.md   # LLM instructions (optional, free-form)
+raw/        # Immutable source documents
+raw/docs/   # Markdown converted from uploaded files
+wiki/       # LLM-generated pages (one .md per page)
 ```
 
-## Create a Wiki
+The endpoints below are exposed by an internal Wiki Worker that's service-bound to the public API. They live under `/v1/repos/:slug/wiki/*` and require the same `x-api-key` header as the rest of the API. All routes also accept a namespaced form: `/v1/repos/:namespace/:slug/wiki/*`.
 
-Fork the `llm-wiki-template` and set up wiki configuration in one call.
+> **Creating a wiki repo.** There's no dedicated `/wiki/init` endpoint. Create a regular repo with [POST /v1/repos](/docs/api-reference/repositories#create-repository), then commit a `wiki.json` plus your initial `raw/` material via the [Commits API](/docs/api-reference/commits). The wiki endpoints below take over once the repo has the expected layout.
 
-```http
-POST /v1/repos/:slug/wiki/init
-```
+## List Pages
 
-**Permission:** Write access required.
-
-```json
-{
-  "slug": "my-research",
-  "title": "AI Research Wiki",
-  "description": "Deep dive into transformer architectures",
-  "namespace": "alice",
-  "visibility": "private"
-}
-```
-
-| Field | Required | Description |
-|-------|----------|-------------|
-| `slug` | Yes | Repository slug for the new wiki |
-| `title` | No | Wiki title (default: "My Knowledge Base") |
-| `description` | No | Wiki description |
-| `namespace` | No | Optional namespace |
-| `visibility` | No | `private` (default) or `public` |
-
-### Response `201`
-
-```json
-{
-  "id": "abc123",
-  "slug": "my-research",
-  "description": "AI Research Wiki",
-  "default_branch": "main",
-  "visibility": "private",
-  "wiki_config": {
-    "version": 1,
-    "title": "AI Research Wiki",
-    "description": "Deep dive into transformer architectures",
-    "llms_txt": {
-      "include_sources": false,
-      "max_pages": 500,
-      "sort": "updated"
-    }
-  },
-  "git_url": "https://api.coregit.dev/myorg/my-research.git",
-  "api_url": "https://api.coregit.dev/v1/repos/my-research",
-  "created_at": "2026-04-10T12:00:00Z"
-}
-```
-
-### SDK
-
-```typescript
-const { data } = await cg.wiki.init({
-  slug: "my-research",
-  title: "AI Research Wiki",
-  description: "Deep dive into transformer architectures",
-});
-```
-
-## List Wiki Pages
-
-List all pages under `wiki/` with parsed YAML frontmatter.
+Return parsed metadata for every `.md` under `wiki/`.
 
 ```http
 GET /v1/repos/:slug/wiki/pages
 ```
 
-| Param | Description |
+| Query | Description |
 |-------|-------------|
-| `type` | Filter by page type: `entity`, `concept`, `source-summary`, `comparison`, `analysis` |
-| `tag` | Filter by tag |
-| `sort` | Sort field: `updated` (default), `created`, `title` |
-| `limit` | Max results (default: 50, max: 200) |
-| `offset` | Pagination offset |
-| `ref` | Branch or commit SHA |
+| `ref` | Branch or commit SHA. Default `main`. |
 
 ### Response `200`
 
@@ -105,37 +40,40 @@ GET /v1/repos/:slug/wiki/pages
       "path": "wiki/transformers.md",
       "title": "Transformer Architecture",
       "summary": "The dominant architecture for sequence modeling since 2017",
-      "tags": ["deep-learning", "architecture"],
+      "tags": ["deep-learning"],
       "type": "concept",
-      "sources": ["raw/attention-is-all-you-need.md"],
-      "related": ["wiki/attention.md", "wiki/bert.md"],
-      "created": "2026-04-10",
       "updated": "2026-04-10",
-      "word_count": 1250
+      "word_count": 1250,
+      "sources": ["raw/attention-paper.md"],
+      "related": ["wiki/attention.md"]
     }
   ],
-  "total": 42,
-  "ref": "main"
+  "count": 1,
+  "at_version": "main"
 }
 ```
+
+Each page is parsed for YAML frontmatter; everything in `frontmatter.title|summary|tags|type|sources|related|updated` is hoisted to the row. Result is cached for 10 minutes per `(repo, ref)` pair.
 
 ### SDK
 
 ```typescript
-const { data } = await cg.wiki.listPages("my-research", {
-  type: "concept",
-  tag: "deep-learning",
-  sort: "updated",
-});
+const { data } = await cg.wiki.listPages("my-research");
 ```
 
-## Read a Wiki Page
+## Get Page
 
-Get a single page with parsed frontmatter and full content.
+Read a single wiki page with parsed frontmatter, dual-section split, and word count.
 
 ```http
 GET /v1/repos/:slug/wiki/pages/:path
 ```
+
+The `:path` segment may be the path with or without the leading `wiki/`. Both `wiki/transformers.md` and `transformers.md` resolve the same blob.
+
+| Query | Description |
+|-------|-------------|
+| `ref` | Branch or commit SHA. Default `main`. |
 
 ### Response `200`
 
@@ -145,33 +83,55 @@ GET /v1/repos/:slug/wiki/pages/:path
   "frontmatter": {
     "title": "Transformer Architecture",
     "summary": "The dominant architecture for sequence modeling since 2017",
-    "tags": ["deep-learning", "architecture"],
-    "sources": ["raw/attention-is-all-you-need.md"],
+    "tags": ["deep-learning"],
     "type": "concept",
+    "sources": ["raw/attention-paper.md"],
     "related": ["wiki/attention.md"],
-    "created": "2026-04-10",
     "updated": "2026-04-10"
   },
-  "content": "The Transformer was introduced in...",
+  "content": "---\ntitle: \"Transformer Architecture\"\n...\n---\n\n## Truth\n...",
+  "compiled_truth": "## Truth\n\nA transformer is...",
+  "timeline": "- **2026-04-10 (sync)**: refined attention section.\n",
+  "has_dual_section": true,
   "word_count": 1250,
-  "sha": "a1b2c3d4",
-  "ref": "main"
+  "version_id": "9c3a1f...",
+  "at_version": "main"
 }
 ```
+
+`compiled_truth` is the canonical "current state" half of the dual-section pattern; `timeline` is the append-only history half. Pages without the dual-section markers fall back to `compiled_truth = body`.
 
 ### SDK
 
 ```typescript
-const { data } = await cg.wiki.getPage("my-research", "transformers.md");
+const { data } = await cg.wiki.getPage("my-research", "wiki/transformers.md");
 ```
 
-## List Raw Sources
+## List Sources
 
-List files in the `raw/` directory.
+List the raw source files (everything under `raw/`, excluding `.gitkeep`).
 
 ```http
 GET /v1/repos/:slug/wiki/sources
 ```
+
+| Query | Description |
+|-------|-------------|
+| `ref` | Branch or commit SHA. Default `main`. |
+
+### Response `200`
+
+```json
+{
+  "sources": [
+    { "path": "raw/attention-paper.md", "size": 0 }
+  ],
+  "count": 1,
+  "at_version": "main"
+}
+```
+
+`size` is reported as `0` in list responses — fetch the individual source for the real byte count.
 
 ### SDK
 
@@ -179,151 +139,45 @@ GET /v1/repos/:slug/wiki/sources
 const { data } = await cg.wiki.listSources("my-research");
 ```
 
-## Read a Raw Source
+## Get Source
 
-Get the content of a source file.
+Read a single raw source file.
 
 ```http
 GET /v1/repos/:slug/wiki/sources/:path
 ```
 
-### SDK
-
-```typescript
-const { data } = await cg.wiki.getSource("my-research", "attention-is-all-you-need.md");
-```
-
-## Get Wiki Index
-
-Read the `index.md` content catalog — the file LLM agents read first to understand wiki structure.
-
-```http
-GET /v1/repos/:slug/wiki/index
-```
-
-### SDK
-
-```typescript
-const { data } = await cg.wiki.getIndex("my-research");
-```
-
-## Get Activity Log
-
-Read parsed entries from `log.md` — chronological record of ingests, queries, and lint passes.
-
-```http
-GET /v1/repos/:slug/wiki/log
-```
-
-| Param | Description |
-|-------|-------------|
-| `limit` | Max entries (default: 20, max: 100) |
-| `offset` | Pagination offset |
+The `:path` segment may include or omit the leading `raw/` — both `raw/foo.md` and `foo.md` resolve the same blob.
 
 ### Response `200`
 
 ```json
 {
-  "entries": [
-    {
-      "date": "2026-04-10",
-      "operation": "ingest",
-      "title": "Attention Is All You Need",
-      "body": "Processed paper. Created wiki/transformers.md, updated wiki/attention.md."
-    }
-  ],
-  "total": 15,
-  "ref": "main"
+  "path": "raw/attention-paper.md",
+  "content": "Attention Is All You Need\n\n...",
+  "size": 8421,
+  "version_id": "9c3a1f...",
+  "at_version": "main"
 }
 ```
 
 ### SDK
 
 ```typescript
-const { data } = await cg.wiki.getLog("my-research", { limit: 10 });
-```
-
-## Generate llms.txt
-
-Auto-generate a structured text file for external LLM consumption. Follows the emerging `llms.txt` convention.
-
-```http
-GET /v1/repos/:slug/wiki/llms.txt
-```
-
-| Param | Description |
-|-------|-------------|
-| `format` | `compact` (default) — summaries only. `full` — includes page content. |
-| `ref` | Branch or commit SHA |
-
-Returns `Content-Type: text/plain`. Cached by commit SHA.
-
-### Compact format
-
-```
-# AI Research Wiki
-> Deep dive into transformer architectures
-
-## Pages
-- [Transformer Architecture](wiki/transformers.md): The dominant architecture for sequence modeling since 2017
-- [Attention Mechanism](wiki/attention.md): Core mechanism enabling transformers to weigh input tokens
-
-## Sources
-- raw/attention-is-all-you-need.md (8,200 words)
-```
-
-### Full format
-
-Includes full page content after the summaries section.
-
-### SDK
-
-```typescript
-const { data } = await cg.wiki.llmsTxt("my-research", { format: "full" });
-```
-
-## Semantic Search
-
-Search across wiki pages AND raw sources using natural language. Wraps the existing [semantic search](/docs/api-reference/semantic-search) pipeline with wiki-specific scoping.
-
-```http
-POST /v1/repos/:slug/wiki/search
-```
-
-```json
-{
-  "q": "How does multi-head attention work?",
-  "scope": "all",
-  "top_k": 10
-}
-```
-
-| Field | Required | Description |
-|-------|----------|-------------|
-| `q` | Yes | Natural language query |
-| `scope` | No | `all` (default), `wiki` (only wiki pages), `sources` (only raw sources) |
-| `top_k` | No | Number of results (default: 10) |
-| `tag` | No | Filter wiki results by tag |
-| `type` | No | Filter wiki results by page type |
-
-Wiki page results include parsed `frontmatter`.
-
-### SDK
-
-```typescript
-const { data } = await cg.wiki.search("my-research", {
-  q: "How does multi-head attention work?",
-  scope: "wiki",
-});
+const { data } = await cg.wiki.getSource("my-research", "raw/attention-paper.md");
 ```
 
 ## Knowledge Graph
 
-Get the wiki's knowledge graph — built from frontmatter `related` links, `sources` references, and shared `tags`.
+Build a graph from `frontmatter.related` links, `frontmatter.sources` references, and shared `tags`.
 
 ```http
 GET /v1/repos/:slug/wiki/graph
 ```
+
+| Query | Description |
+|-------|-------------|
+| `ref` | Branch or commit SHA. Default `main`. |
 
 ### Response `200`
 
@@ -342,7 +196,7 @@ GET /v1/repos/:slug/wiki/graph
     "deep-learning": ["wiki/transformers.md", "wiki/bert.md"]
   },
   "stats": { "pages": 42, "sources": 15, "links": 87, "orphans": 3 },
-  "ref": "main"
+  "at_version": "main"
 }
 ```
 
@@ -354,11 +208,15 @@ const { data } = await cg.wiki.graph("my-research");
 
 ## Wiki Stats
 
-Health overview — pages, sources, links, orphans, type distribution, last activity.
+Health overview.
 
 ```http
 GET /v1/repos/:slug/wiki/stats
 ```
+
+| Query | Description |
+|-------|-------------|
+| `ref` | Branch or commit SHA. Default `main`. |
 
 ### Response `200`
 
@@ -366,14 +224,11 @@ GET /v1/repos/:slug/wiki/stats
 {
   "pages": 42,
   "sources": 15,
+  "words": 52500,
   "links": 87,
   "orphans": 3,
-  "total_words": 52500,
-  "avg_words_per_page": 1250,
-  "types": { "concept": 18, "entity": 12, "source-summary": 10, "comparison": 2 },
-  "tags": 24,
-  "last_activity": "2026-04-10",
-  "ref": "main"
+  "dual_section_pages": 28,
+  "at_version": "main"
 }
 ```
 
@@ -383,22 +238,373 @@ GET /v1/repos/:slug/wiki/stats
 const { data } = await cg.wiki.stats("my-research");
 ```
 
-## Writing to the Wiki
+## Generate llms.txt
 
-Wiki pages and sources are written using the standard [Commits API](/docs/api-reference/commits). The wiki endpoints are read-only convenience layers.
+Auto-generate a structured `text/plain` file for external LLM consumption, following the emerging [`llms.txt` convention](https://llmstxt.org). Reads `wiki.json` for title and inclusion options.
 
-To add a source:
-
-```typescript
-await cg.commits.create("my-research", {
-  branch: "main",
-  message: "Add source: Attention Is All You Need",
-  author: { name: "alice", email: "alice@example.com" },
-  changes: [{ path: "raw/attention-paper.md", content: "..." }],
-});
+```http
+GET /v1/repos/:slug/wiki/llms.txt
 ```
 
-To create or update a wiki page:
+| Query | Description |
+|-------|-------------|
+| `ref` | Branch or commit SHA. Default `main`. |
+| `format` | `compact` (default) — page summaries only. `full` — also embeds page content. |
+
+Cached by commit SHA. `Content-Type: text/plain`.
+
+### Compact format
+
+```
+# AI Research Wiki
+> Deep dive into transformer architectures
+
+## Pages
+- [Transformer Architecture](wiki/transformers.md): The dominant architecture for sequence modeling since 2017
+- [Attention Mechanism](wiki/attention.md): Core mechanism enabling transformers to weigh input tokens
+
+## Sources
+- raw/attention-paper.md
+```
+
+### `wiki.json` config
+
+```json
+{
+  "version": 1,
+  "title": "AI Research Wiki",
+  "description": "Deep dive into transformer architectures",
+  "llms_txt": {
+    "include_sources": false,
+    "max_pages": 500,
+    "sort": "updated"
+  }
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `version` | Currently `1`. |
+| `title` | Used in the llms.txt header. Falls back to repo slug if unset. |
+| `description` | Optional one-line subtitle. |
+| `llms_txt.include_sources` | If `true`, includes `raw/` files in the output. Default `false`. |
+| `llms_txt.max_pages` | Cap on pages emitted. Default `500`. |
+| `llms_txt.sort` | `updated` (default), `created`, or `title`. |
+
+### SDK
+
+```typescript
+const { data } = await cg.wiki.llmsTxt("my-research", { format: "full" });
+```
+
+## Page History
+
+Outcome-framed activity log for a page. Internal git verbs never surface — every entry uses `version_id`, `changed_by`, `changed_at`, `summary`.
+
+```http
+GET /v1/repos/:slug/wiki/pages/:path/history
+```
+
+| Query | Description |
+|-------|-------------|
+| `limit` | Max entries. Default `25`, max `100`. |
+
+### Response `200`
+
+```json
+{
+  "path": "wiki/transformers.md",
+  "activity": [
+    {
+      "version_id": "9c3a1f8b...",
+      "changed_by": { "name": "Wiki Agent", "email": "agent@example.com" },
+      "changed_at": "2026-04-10T08:00:00Z",
+      "summary": "sync: refined attention section",
+      "message": "sync: refined attention section\n\nApplied feedback from raw/transformer-review.md."
+    }
+  ],
+  "count": 1
+}
+```
+
+## View Page At Date
+
+Read a page as it existed at or before a given timestamp.
+
+```http
+GET /v1/repos/:slug/wiki/pages/:path/as-of
+```
+
+| Query | Description |
+|-------|-------------|
+| `as_of` | **Required.** ISO 8601 timestamp (e.g. `2026-03-15T00:00:00Z`). |
+
+The route resolves the closest commit on `main` at or before `as_of`, then returns the page exactly as it was then.
+
+### Response `200`
+
+```json
+{
+  "path": "wiki/transformers.md",
+  "frontmatter": { "title": "Transformer Architecture", "tags": ["deep-learning"] },
+  "compiled_truth": "## Truth\n\nA transformer is...",
+  "timeline": "- **2026-03-12 (sync)**: initial draft.\n",
+  "version_id": "5e7a2c...",
+  "as_of": "2026-03-15T00:00:00Z"
+}
+```
+
+Returns `404` if the page didn't yet exist at that date.
+
+## Restore Page
+
+Restore a page to a previous version. Bumps `frontmatter.provenance.last_human_edit` and appends a restore note to the timeline so subsequent syncs honour the rollback.
+
+```http
+POST /v1/repos/:slug/wiki/pages/:path/restore
+```
+
+```json
+{ "version_id": "5e7a2c8b..." }
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `version_id` | Yes | Git SHA of the page version to restore. |
+
+### Response `200`
+
+```json
+{
+  "path": "wiki/transformers.md",
+  "version_id": "a1b2c3d4...",
+  "restored_from": "5e7a2c8b..."
+}
+```
+
+`version_id` in the response is the **new** commit SHA that holds the restore; `restored_from` is the historical version you targeted.
+
+## Upload Document
+
+Convert a binary document (PDF, DOCX, XLSX, image, …) to markdown via Cloudflare Workers AI, commit it to `raw/docs/`, and enqueue an `ingest` run that synthesizes it into wiki pages.
+
+```http
+POST /v1/repos/:slug/wiki/documents
+Content-Type: multipart/form-data
+```
+
+| Form field | Required | Description |
+|------------|----------|-------------|
+| `file` | Yes | The document. Up to 25 MB. |
+| `description` | No | One-line note saved as `summary` in frontmatter. |
+
+Supported extensions: `pdf, docx, xlsx, xlsm, xlsb, xls, ods, odt, csv, html, htm, xml, numbers, md, txt, png, jpg, jpeg, webp, svg`.
+
+### Response `200`
+
+```json
+{
+  "path": "raw/docs/attention-paper.md",
+  "original_filename": "attention-paper.pdf",
+  "bytes": 8421334,
+  "markdown_length": 65440,
+  "run_id": "f8b2c1..."
+}
+```
+
+The commit lands on `main` immediately; `run_id` lets you poll the synthesis run via [Get Run](#get-run).
+
+## List Documents
+
+List markdown files under `raw/docs/`.
+
+```http
+GET /v1/repos/:slug/wiki/documents
+```
+
+### Response `200`
+
+```json
+{
+  "documents": [
+    {
+      "path": "raw/docs/attention-paper.md",
+      "name": "attention-paper.md",
+      "sha": "9c3a1f..."
+    }
+  ]
+}
+```
+
+## Run Workflow
+
+Kick off a wiki workflow: `sync` (re-synthesize pages from sources), `dream` (LLM proposes new pages from neglected angles), or `lint` (suggest cleanups).
+
+```http
+POST /v1/repos/:slug/wiki/run
+```
+
+```json
+{
+  "mode": "sync",
+  "source_ids": ["raw/attention-paper.md"],
+  "force": false,
+  "model": "claude-sonnet-4-6",
+  "max_tokens_budget": 200000
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `mode` | Yes | `sync`, `dream`, or `lint`. |
+| `source_ids` | No | Limit a `sync` run to these source paths. |
+| `force` | No | Re-process sources even if `last_human_edit` is newer. |
+| `model` | No | Claude model id. Default `claude-sonnet-4-6`. |
+| `max_tokens_budget` | No | Cap output tokens for the run. |
+
+### Response `200`
+
+```json
+{ "run_id": "f8b2c1...", "status": "queued" }
+```
+
+The run is enqueued; poll [Get Run](#get-run) for progress.
+
+## List Runs
+
+Recent workflow runs for the repo, newest first.
+
+```http
+GET /v1/repos/:slug/wiki/runs
+```
+
+| Query | Description |
+|-------|-------------|
+| `limit` | Default `20`, max `100`. |
+
+### Response `200`
+
+```json
+{
+  "runs": [
+    {
+      "id": "f8b2c1...",
+      "orgId": "...",
+      "repoSlug": "my-research",
+      "namespace": null,
+      "mode": "sync",
+      "status": "running",
+      "trigger": "manual",
+      "model": "claude-sonnet-4-6",
+      "sourceIds": ["raw/attention-paper.md"],
+      "createdAt": "2026-04-10T08:00:00Z",
+      "finishedAt": null
+    }
+  ],
+  "count": 1
+}
+```
+
+## Get Run
+
+Single run detail.
+
+```http
+GET /v1/repos/:slug/wiki/runs/:id
+```
+
+### Response `200`
+
+Same row shape as in [List Runs](#list-runs). `404` if the run doesn't exist or belongs to a different org.
+
+## Cancel Run
+
+Mark a queued or running job as `cancelled`. The Worker cooperatively stops on the next checkpoint; already-committed wiki edits are not rolled back.
+
+```http
+POST /v1/repos/:slug/wiki/cancel
+```
+
+```json
+{ "run_id": "f8b2c1..." }
+```
+
+### Response `200`
+
+```json
+{ "ok": true }
+```
+
+## Sandboxes
+
+Outcome-framed wrapper over branches. A "sandbox" is a `wiki-sandbox/<name>` branch — useful for letting an agent draft changes that humans review before promotion.
+
+### Create Sandbox
+
+```http
+POST /v1/repos/:slug/wiki/sandboxes
+```
+
+```json
+{ "name": "draft-attention-rewrite", "from": "main" }
+```
+
+`name` is sanitized to `[a-zA-Z0-9._-]` (other characters become `-`). `from` defaults to `main`.
+
+### Response `200`
+
+```json
+{ "name": "draft-attention-rewrite", "version_id": "9c3a1f..." }
+```
+
+### List Sandboxes
+
+```http
+GET /v1/repos/:slug/wiki/sandboxes
+```
+
+### Response `200`
+
+```json
+{
+  "sandboxes": [
+    { "name": "draft-attention-rewrite", "version_id": "9c3a1f..." }
+  ],
+  "count": 1
+}
+```
+
+### Promote Sandbox
+
+Merge `wiki-sandbox/<name>` into `main`.
+
+```http
+POST /v1/repos/:slug/wiki/sandboxes/:name/promote
+```
+
+### Response `200`
+
+```json
+{ "name": "draft-attention-rewrite", "version_id": "a1b2c3..." }
+```
+
+`version_id` is the merge commit SHA.
+
+### Delete Sandbox
+
+```http
+DELETE /v1/repos/:slug/wiki/sandboxes/:name
+```
+
+### Response `200`
+
+```json
+{ "ok": true }
+```
+
+## Writing pages from your agent
+
+The wiki endpoints above are the read/lifecycle surface. **Edits to wiki pages, sources, or `wiki.json` go through the standard [Commits API](/docs/api-reference/commits).** Atomic multi-file commits make Karpathy's pattern (one commit per ingest, touching the page plus index/log files) a single round-trip:
 
 ```typescript
 await cg.commits.create("my-research", {
@@ -406,11 +612,28 @@ await cg.commits.create("my-research", {
   message: "ingest: Attention Is All You Need",
   author: { name: "wiki-agent", email: "agent@example.com" },
   changes: [
-    { path: "wiki/transformers.md", content: "---\ntitle: \"Transformer Architecture\"\nsummary: \"...\"\ntags: [deep-learning]\ntype: concept\nsources: [raw/attention-paper.md]\n---\n\nContent here..." },
-    { path: "index.md", content: "...updated index..." },
-    { path: "log.md", content: "...appended entry..." },
+    {
+      path: "wiki/transformers.md",
+      content: `---
+title: "Transformer Architecture"
+summary: "The dominant architecture for sequence modeling since 2017"
+tags: [deep-learning]
+type: concept
+sources: [raw/attention-paper.md]
+updated: 2026-04-10
+---
+
+## Truth
+
+A transformer is...
+
+## Timeline
+
+- **2026-04-10 (ingest)**: created from raw/attention-paper.md.
+`,
+    },
   ],
 });
 ```
 
-This is the pattern Karpathy describes — the LLM agent commits multiple files atomically (one for each updated page, plus index and log updates). Coregit's multi-file atomic commits make this a single API call.
+For sandbox-style workflows (draft → review → promote), commit to a `wiki-sandbox/*` branch and call [Promote Sandbox](#promote-sandbox) once the human approves.

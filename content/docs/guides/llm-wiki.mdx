@@ -34,31 +34,44 @@ Karpathy's original pattern uses a local folder + Claude Code. Coregit adds:
 
 ### 1. Create a wiki
 
-```bash
-curl -X POST https://api.coregit.dev/v1/repos/my-research/wiki/init \
-  -H "x-api-key: cgk_live_YOUR_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"slug": "my-research", "title": "AI Research"}'
-```
-
-Or with the SDK:
+A wiki is just a regular Coregit repo with a specific layout (`wiki.json`, `raw/`, `wiki/`). Create the repo, then commit an initial `wiki.json` plus any starter material — there's no dedicated "wiki init" endpoint.
 
 ```typescript
 import { createCoregitClient } from "@coregit/sdk";
 
 const cg = createCoregitClient({ apiKey: "cgk_live_YOUR_KEY" });
 
-const { data: wiki } = await cg.wiki.init({
+await cg.repos.create({
   slug: "my-research",
-  title: "AI Research",
+  description: "AI Research",
+  visibility: "private",
+});
+
+await cg.commits.create("my-research", {
+  branch: "main",
+  message: "init: wiki layout",
+  author: { name: "alice", email: "alice@example.com" },
+  changes: [
+    {
+      path: "wiki.json",
+      content: JSON.stringify(
+        {
+          version: 1,
+          title: "AI Research",
+          description: "Deep dive into transformer architectures",
+          llms_txt: { include_sources: false, max_pages: 500, sort: "updated" },
+        },
+        null,
+        2,
+      ),
+    },
+    { path: "raw/.gitkeep", content: "" },
+    { path: "wiki/.gitkeep", content: "" },
+  ],
 });
 ```
 
-Or with the CLI:
-
-```bash
-cgt wiki init my-research --title "AI Research"
-```
+The wiki API takes over once the repo has the layout above.
 
 ### 2. Add a source
 
@@ -125,11 +138,21 @@ related: [wiki/attention.md, wiki/source-summaries/attention-paper.md]
 
 ### 4. Query the wiki
 
+For natural-language Q&A across both wiki pages and raw sources, use [agentic search](/docs/api-reference/agentic-search) — it runs a multi-turn grep/read loop against a snapshot of the repo and returns an answer with file locations:
+
 ```typescript
-const { data } = await cg.wiki.search("my-research", {
+const { data } = await cg.search.agentic("my-research", {
   q: "How does self-attention work?",
-  scope: "all", // searches both wiki pages and raw sources
 });
+console.log(data.answer);
+console.log(data.locations); // [{ path, start_line, end_line }, ...]
+```
+
+For structural reads (pages, frontmatter, dual-section split), call the wiki API directly:
+
+```typescript
+const { data: page } = await cg.wiki.getPage("my-research", "wiki/transformers.md");
+console.log(page.compiled_truth, page.timeline);
 ```
 
 ### 5. Browse the knowledge graph

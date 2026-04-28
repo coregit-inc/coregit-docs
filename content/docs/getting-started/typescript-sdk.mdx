@@ -548,6 +548,55 @@ const { data } = await git.workspace.multiExec({
 console.log(data.commits); // { frontend: "a1b2...", backend: "d4e5..." }
 ```
 
+## Filesystem (`fs.mount`)
+
+Higher-level wrapper over `/blob`, `/tree`, `/commits`, and `/exec`. Returns a `MountedFS` handle with POSIX-style methods plus a `bash()` sub-helper. **Throws on error** — this is the one place we use the POSIX-feel API instead of `{ data, error }`.
+
+```typescript
+const fs = await git.fs.mount({
+  repos: [{ slug: "my-repo" }],
+  mode: "rw",
+  author: { name: "Agent", email: "agent@example.com" },
+});
+
+await fs.writeFile("/my-repo/src/README.md", "hello world");
+const text = await fs.readFile("/my-repo/src/README.md");
+
+const r = await fs.bash().exec("npm install && npm test");
+console.log(r.stdout, r.exitCode);
+
+await fs.unmount();
+```
+
+Three commit modes drive when buffered writes turn into git commits:
+
+```typescript
+// auto (default) — every writeFile commits immediately
+const fs = await git.fs.mount({ repos: [{ slug: "my-repo" }] });
+
+// manual — accumulate, then explicit commit({message})
+const fs = await git.fs.mount({
+  repos: [{ slug: "my-repo" }],
+  commitMode: "manual",
+});
+await fs.writeFile("/my-repo/a.md", "...");
+await fs.writeFile("/my-repo/b.md", "...");
+const shas = await fs.commit({ message: "draft a/b" });
+// → { "my-repo": "a1b2c3..." }
+
+// on-exec — buffered writes flush into the next bash().exec()
+const fs = await git.fs.mount({
+  repos: [{ slug: "my-repo" }],
+  commitMode: "on-exec",
+});
+await fs.writeFile("/my-repo/foo.md", "hi");
+const r = await fs.bash().exec("cat /my-repo/foo.md"); // sees "hi", commits the batch
+```
+
+Multi-repo paths are namespaced as `/<slug>/<rest>`; single-repo mounts also accept the slug-less form. Up to 10 repos per mount. Errors come as `MountError` / `MountReadOnlyError` / `MountPathError` / `MountConflictError` (importable from `@coregit/sdk`).
+
+See [Filesystem API reference](/docs/api-reference/filesystem) for the full method list, options, and error model.
+
 ## Search
 
 Full-text code search across repositories.
@@ -907,55 +956,28 @@ console.log(detailed.results[0].relationships);
 
 ## LLM Wiki
 
-Create and query persistent knowledge bases maintained by LLM agents. Based on the [LLM Wiki pattern](https://github.com/karpathy/llm-wiki) by Andrej Karpathy.
+Read parsed wiki pages, sources, knowledge graphs, and activity logs from a wiki-shaped repo. Inspired by the [LLM Wiki pattern](https://github.com/karpathy/llm-wiki) by Andrej Karpathy.
+
+> **Creating a wiki repo** is just `git.repos.create({ slug })` followed by an initial commit that lays down `wiki.json` and your `raw/` material. There's no dedicated `wiki.init` method.
 
 ```typescript
-// Create a wiki (forks llm-wiki-template)
-const { data: wiki } = await git.wiki.init({
-  slug: "my-research",
-  title: "AI Research Wiki",
-  description: "Deep dive into transformer architectures",
-});
-
 // List pages with parsed frontmatter
-const { data: pages } = await git.wiki.listPages("my-research", {
-  type: "concept",
-  tag: "deep-learning",
-  sort: "updated",
-});
+const { data: pages } = await git.wiki.listPages("my-research");
 for (const page of pages.pages) {
   console.log(page.title, page.tags, page.word_count);
 }
 
-// Read a single page
-const { data: page } = await git.wiki.getPage("my-research", "transformers.md");
+// Read a single page (with or without leading "wiki/")
+const { data: page } = await git.wiki.getPage("my-research", "wiki/transformers.md");
 console.log(page.frontmatter.summary);
-console.log(page.content);
+console.log(page.compiled_truth, page.timeline);
 
-// List raw sources
+// List and read raw sources
 const { data: sources } = await git.wiki.listSources("my-research");
-
-// Read source content
-const { data: source } = await git.wiki.getSource("my-research", "attention-paper.md");
-
-// Get wiki index (content catalog — what agents read first)
-const { data: index } = await git.wiki.getIndex("my-research");
-
-// Get activity log (ingest history)
-const { data: log } = await git.wiki.getLog("my-research", { limit: 10 });
-for (const entry of log.entries) {
-  console.log(`[${entry.date}] ${entry.operation}: ${entry.title}`);
-}
+const { data: source }  = await git.wiki.getSource("my-research", "raw/attention-paper.md");
 
 // Generate llms.txt (structured text for external LLMs)
 const { data: llmsTxt } = await git.wiki.llmsTxt("my-research", { format: "full" });
-
-// Semantic search across wiki pages AND raw sources
-const { data: results } = await git.wiki.search("my-research", {
-  q: "How does multi-head attention work?",
-  scope: "all", // "wiki" | "sources" | "all"
-  top_k: 10,
-});
 
 // Knowledge graph (nodes, edges, tag clusters)
 const { data: graph } = await git.wiki.graph("my-research");
@@ -963,25 +985,43 @@ console.log(graph.stats); // { pages: 42, sources: 15, links: 87, orphans: 3 }
 
 // Wiki health stats
 const { data: stats } = await git.wiki.stats("my-research");
-console.log(stats.types); // { concept: 18, entity: 12, ... }
+console.log(stats.pages, stats.sources, stats.dual_section_pages);
 ```
+
+`wiki.listPages`, `getPage`, `listSources`, `getSource`, `llmsTxt`, `graph`, `stats` are the SDK-mapped methods today. **History (`/wiki/pages/:path/history`, `/as-of`, `/restore`), document upload (`/wiki/documents`), workflow runs (`/wiki/run`, `/wiki/runs`, `/wiki/cancel`), and sandboxes (`/wiki/sandboxes/*`)** are available as REST endpoints and don't yet have dedicated SDK helpers — call them through `fetch` or via the REST examples in the [LLM Wiki API reference](/docs/api-reference/wiki).
 
 ### Writing to the Wiki
 
-Wiki endpoints are read-only. Use the standard commits API to write pages:
+Wiki SDK methods are read-only. Use the standard commits API to write pages — Karpathy's "one ingest = one atomic commit touching multiple files" pattern is a single round-trip:
 
 ```typescript
-// Ingest workflow: add source + create wiki pages in one atomic commit
 await git.commits.create("my-research", {
   branch: "main",
   message: "ingest: Attention Is All You Need",
   author: { name: "wiki-agent", email: "agent@example.com" },
   changes: [
     { path: "raw/attention-paper.md", content: paperContent },
-    { path: "wiki/transformers.md", content: "---\ntitle: \"Transformers\"\nsummary: \"...\"\ntags: [deep-learning]\ntype: concept\nsources: [raw/attention-paper.md]\nrelated: [wiki/attention.md]\ncreated: \"2026-04-10\"\nupdated: \"2026-04-10\"\n---\n\nContent..." },
-    { path: "wiki/attention.md", content: "---\ntitle: \"Attention\"\n..." },
-    { path: "index.md", content: updatedIndex },
-    { path: "log.md", content: updatedLog },
+    {
+      path: "wiki/transformers.md",
+      content: `---
+title: "Transformer Architecture"
+summary: "..."
+tags: [deep-learning]
+type: concept
+sources: [raw/attention-paper.md]
+related: [wiki/attention.md]
+updated: 2026-04-10
+---
+
+## Truth
+
+A transformer is...
+
+## Timeline
+
+- **2026-04-10 (ingest)**: created from raw/attention-paper.md.
+`,
+    },
   ],
 });
 ```

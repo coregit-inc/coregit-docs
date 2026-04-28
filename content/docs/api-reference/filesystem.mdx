@@ -1,0 +1,218 @@
+---
+title: Filesystem (fs.mount)
+description: In-process versioned filesystem for AI agents — POSIX-style writeFile/readFile/bash().exec() backed by atomic git commits.
+---
+
+`coregit.fs.mount()` returns a `MountedFS` handle that exposes the repo as a filesystem. Reads are lazy through git objects; writes batch into one or more atomic commits. A `bash()` sub-helper runs shell commands server-side over the same overlay, so the agent's writes show up to `cat`, `grep`, `npm`, anything.
+
+```typescript
+import { CoregitClient } from "@coregit/sdk";
+
+const cg = new CoregitClient({ apiKey: process.env.COREGIT_API_KEY! });
+
+const fs = await cg.fs.mount({
+  repos: [{ slug: "my-repo" }],
+  mode: "rw",
+});
+
+await fs.writeFile("/my-repo/src/README.md", "hello world");
+const r = await fs.bash().exec("cat /my-repo/src/README.md");
+console.log(r.stdout);
+
+await fs.unmount();
+```
+
+Up to 10 repos can be mounted in one handle. Paths are namespaced by slug — `/my-repo/...` for the example above. Single-repo mounts also accept the slug-less form (`fs.writeFile("/README.md", ...)`).
+
+> **Throws on error** unlike the rest of the SDK. `MountedFS` is the one place we use the POSIX-feel `await fs.writeFile(...)` API and surface failures as exceptions (`MountError` and subclasses). All other SDK methods return `{ data, error }`.
+
+## Open a Mount
+
+```typescript
+const fs = await cg.fs.mount({
+  repos: [{ slug: "my-repo", branch: "agents/alice" }],
+  mode: "rw",
+  branch: "main",                        // default for repos that don't override
+  author: { name: "alice", email: "alice@example.com" },
+  commitMode: "auto",
+});
+```
+
+| Option | Required | Description |
+|--------|----------|-------------|
+| `repos` | Yes | Array of `{ slug, namespace?, branch? }`. 1–10 entries. |
+| `mode` | No | `"rw"` (default) or `"ro"`. In `"ro"` mode every mutating method throws `MountReadOnlyError`. |
+| `branch` | No | Default branch applied to repos that don't set their own. Defaults to `"main"`. |
+| `author` | No | `{ name, email }` used for auto-mode commits. Defaults to `coregit-sdk <sdk@coregit.dev>`. |
+| `commitMode` | No | See [Commit modes](#commit-modes) below. Default `"auto"`. |
+
+`mount()` is purely client-side construction — no HTTP — so it's cheap to call repeatedly.
+
+## Commit Modes
+
+`commitMode` controls when buffered writes turn into git commits.
+
+| Mode | Behaviour | Best for |
+|------|-----------|----------|
+| `"auto"` (default) | Every `writeFile`/`mkdir`/`rm`/`mv` triggers an immediate `POST /commits` for that single change. Bash sees the new HEAD on the next call. | Quick experimentation, one-off agent steps. Mental model: "everything is persisted instantly." |
+| `"manual"` | Writes accumulate in an in-memory queue keyed by repo. `commit({message})` flushes the queue. `bash()` does **not** flush — the shell sees only what was already committed. | Composing a large, named commit from many small writes. |
+| `"on-exec"` | Like `manual`, but `bash().exec()` flushes pending writes into the same exec call (via `pre_apply_changes`) so the shell sees them, then commits the whole batch. | Agent loops where writes and shell commands interleave and you want one clean commit per loop iteration. |
+
+```typescript
+// Manual mode — accumulate, then flush
+const fs = await cg.fs.mount({
+  repos: [{ slug: "my-repo" }],
+  mode: "rw",
+  commitMode: "manual",
+});
+await fs.writeFile("/my-repo/a.md", "...");
+await fs.writeFile("/my-repo/b.md", "...");
+await fs.writeFile("/my-repo/c.md", "...");
+const shas = await fs.commit({ message: "draft a/b/c" });
+// → { "my-repo": "a1b2c3..." }
+```
+
+## Reads
+
+All read methods go directly to the public `/tree` and `/blob` endpoints — buffered writes are **not** visible to reads in `manual`/`on-exec` modes until you `commit()` or run `bash()`.
+
+### `readFile(path, options?)`
+
+```typescript
+const text  = await fs.readFile("/my-repo/README.md");
+const bytes = await fs.readFile("/my-repo/img.png", { encoding: "binary" });
+```
+
+UTF-8 string by default. Pass `{ encoding: "binary" }` to get a `Uint8Array`.
+
+### `readdir(path, options?)`
+
+```typescript
+const entries = await fs.readdir("/my-repo/src");
+// → [{ name, path, type: "file" | "folder", sha, mode }, ...]
+
+const flat = await fs.readdir("/my-repo", { recursive: true });
+```
+
+### `stat(path)` / `exists(path)`
+
+```typescript
+const st = await fs.stat("/my-repo/README.md");
+// → { type: "file", size: 0, sha: "9c3a1f...", mode: "100644" }
+
+if (await fs.exists("/my-repo/missing.md")) { /* ... */ }
+```
+
+`stat` derives via the parent's `readdir`; size on file entries is currently `0` (server-side blob size isn't surfaced by the tree endpoint yet — `readFile().length` is the canonical source).
+
+## Writes
+
+| Method | Behaviour |
+|--------|-----------|
+| `writeFile(path, content)` | Create or overwrite a file. `content` may be `string` (utf-8) or `Uint8Array` (base64-encoded on the wire). |
+| `mkdir(path)` | Equivalent to `writeFile(path + "/.gitkeep", "")`. Git doesn't track empty directories. |
+| `rm(path)` | Delete a file. Errors if the path doesn't exist. |
+| `mv(oldPath, newPath)` | Rename within a repo (single atomic operation) or across repos (read+write+delete fallback — not atomic across repos). |
+
+In `commitMode: "auto"` each call triggers one `POST /commits` immediately. In `manual`/`on-exec` they accumulate in `pending` until you `commit()` or `bash()`.
+
+## Bash
+
+```typescript
+const r = await fs.bash().exec("ls -la /my-repo && cat /my-repo/README.md");
+//   r.stdout, r.stderr, r.exitCode, r.commits, r.changedFiles, r.executionTimeMs
+```
+
+Multi-repo mounts hit `POST /v1/workspace/exec`; single-repo mounts hit `POST /v1/repos/:slug/exec`. In `manual`/`on-exec` modes the pending queue is sent as `pre_apply_changes` so the shell sees buffered writes; in `on-exec` the same call also commits everything.
+
+| Option | Description |
+|--------|-------------|
+| `cwd` | Working directory inside the workspace. Default `"/"`. |
+| `env` | Extra environment variables. |
+| `commit` | Override the mode-default commit behaviour. |
+| `commitMessage` | Message for the auto-generated commit. |
+| `author` | `{ name, email }` for the commit author. Defaults to the mount's `author`. |
+
+`BashExecResult` shape:
+
+```typescript
+{
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+  changedFiles: Record<string, { path: string; action: string }[]>;
+  commits: Record<string, string>;            // repoKey → new commit SHA
+  reposMounted: string[];
+  executionTimeMs: number;
+}
+```
+
+## Commit (manual flush)
+
+```typescript
+const shas = await fs.commit({
+  message: "feat: add three drafts",
+  repos: ["my-repo"],     // optional, defaults to all repos with pending changes
+});
+// → { "my-repo": "a1b2c3..." }
+```
+
+Throws `MountError` if you call it in `commitMode: "auto"` (every write already commits). Throws `MountConflictError` on a CAS conflict against the branch — usually means another writer raced and you need to re-pull and retry.
+
+## Unmount
+
+```typescript
+await fs.unmount();
+```
+
+Pure client-side cleanup. In `manual`/`on-exec` modes, **outstanding pending changes are discarded with a warning** — call `commit()` first if you want them persisted.
+
+## Multi-Repo
+
+```typescript
+const fs = await cg.fs.mount({
+  repos: [
+    { slug: "frontend" },
+    { slug: "backend" },
+    { slug: "shared",  branch: "main" },
+  ],
+  mode: "rw",
+});
+
+await fs.writeFile("/frontend/src/App.tsx", "...");
+await fs.writeFile("/backend/src/server.ts", "...");
+
+const r = await fs.bash().exec(`
+  cd /frontend && grep -r 'API_URL' .
+  cd /backend  && grep -r 'CORS_ORIGIN' .
+`);
+```
+
+Paths must start with `/<slug>/`. Cross-repo `mv` is supported but not atomic — it does a read on the source repo, write on the destination, then a delete on the source.
+
+## Errors
+
+| Class | Thrown when |
+|-------|-------------|
+| `MountError` | Generic — wraps any HTTP failure, network error, or precondition violation. |
+| `MountReadOnlyError` | A mutating call (`writeFile`, `rm`, `mv`, `mkdir`, `commit`) on a `mode: "ro"` mount. |
+| `MountPathError` | Path doesn't start with `/`, doesn't match any mounted repo, or refers to a missing file (404 from server). |
+| `MountConflictError` | CAS conflict when committing — branch HEAD moved underneath you. |
+
+```typescript
+import { MountConflictError } from "@coregit/sdk";
+
+try {
+  await fs.commit({ message: "..." });
+} catch (err) {
+  if (err instanceof MountConflictError) {
+    // pull the new HEAD and retry
+  } else {
+    throw err;
+  }
+}
+```
+
+## Why this exists
+
+Coregit's other endpoints (`/blob`, `/tree`, `/commits`, `/workspace/exec`) are the building blocks. `fs.mount()` is the agent-facing facade that mirrors how an agent already thinks about working with a project: open a workspace, read/write files, run `npm install`, then commit. No clones, no temporary directories, no manual git plumbing — but every change is a real git commit with a real SHA, on a branch you can review or merge.
