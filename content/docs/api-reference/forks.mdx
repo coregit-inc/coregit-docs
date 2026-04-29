@@ -1,11 +1,18 @@
 ---
 title: Forks & Templates
-description: Fork template repositories to create new projects instantly with inherited search and code graph.
+description: Instant forks for parallel agent swarms. Snapshot parent refs in milliseconds, share blobs through a global content-addressed store, no R2 copy.
 ---
 
 ## Overview
 
-Templates let platforms offer starter projects. Users fork templates into their own namespace, getting a full copy of the code with semantic search and code graph available immediately — no re-indexing required.
+Coregit forks are **instant**. Default-mode `POST /v1/repos/:slug/fork` returns
+in milliseconds regardless of parent size, by snapshotting the parent's refs
+and materializing reference-count edges into a global content-addressed blob
+store — never copying R2 bytes. Spinning up 50 parallel agent branches off the
+same parent is essentially free.
+
+For platforms that need a fully self-contained copy (no chain to the parent),
+pass `mode: "deep"` and the fork is created as a chain-flattened standalone.
 
 ## Create a Template
 
@@ -42,8 +49,6 @@ PATCH /v1/repos/nextjs-starter
 GET /v1/repos?is_template=true
 ```
 
-Returns only template repositories.
-
 ## Fork a Repository
 
 ```http
@@ -53,16 +58,20 @@ POST /v1/repos/:namespace/:slug/fork
 
 ```json
 {
-  "slug": "my-app",
+  "slug": "agent-001",
   "namespace": "alice",
-  "description": "My project based on nextjs-starter"
+  "description": "Agent run from nextjs-starter",
+  "mode": "instant"
 }
 ```
 
-- `slug` — Required. Target repository slug
-- `namespace` — Optional. Target namespace
-- `description` — Optional. Defaults to source description
-- `default_branch` — Optional. Defaults to source default branch
+| Field | Required | Description |
+|-------|----------|-------------|
+| `slug` | yes | Target repo slug. |
+| `namespace` | no | Target namespace. |
+| `description` | no | Defaults to source description. |
+| `default_branch` | no | Defaults to source default branch. |
+| `mode` | no | `"instant"` (default) — point-in-time snapshot, no R2 copy. `"deep"` — chain-flattened standalone. |
 
 **Response** `201`:
 
@@ -70,8 +79,8 @@ POST /v1/repos/:namespace/:slug/fork
 {
   "id": "fork_xyz789",
   "namespace": "alice",
-  "slug": "my-app",
-  "description": "My project based on nextjs-starter",
+  "slug": "agent-001",
+  "description": "Agent run from nextjs-starter",
   "default_branch": "main",
   "visibility": "private",
   "is_template": false,
@@ -81,33 +90,103 @@ POST /v1/repos/:namespace/:slug/fork
     "slug": "nextjs-starter",
     "namespace": null
   },
-  "semantic_inherited": true,
-  "graph_copied": true,
-  "graph_nodes_count": 42,
-  "git_url": "https://api.coregit.dev/myorg/alice/my-app.git",
-  "api_url": "https://api.coregit.dev/v1/repos/alice/my-app",
-  "created_at": "2025-01-01T00:00:00Z"
+  "fork_mode": "instant",
+  "fork_depth": 1,
+  "fork_root": "repo_abc123",
+  "blob_materialization": "sync",
+  "shared_blobs": 18432,
+  "owned_blobs": 0,
+  "git_url": "https://api.coregit.dev/myorg/alice/agent-001.git",
+  "api_url": "https://api.coregit.dev/v1/repos/alice/agent-001",
+  "created_at": "2026-04-29T02:30:44.445Z"
 }
 ```
 
-## What Happens During Fork
+| Response field | Meaning |
+|-----------------|---------|
+| `fork_mode` | Effective mode used. May differ from request when `fork_depth > 16` forces auto-flatten to `"deep"`. |
+| `fork_depth` | Distance from the chain root. `1` for a direct fork of a non-fork. |
+| `fork_root` | Repo ID at the chain root. Equals the new repo's id when `fork_mode` is `"deep"`. |
+| `blob_materialization` | `"sync"` — every reachable blob got a `blob_repo` edge inline. `"queued"` — large parent; remaining edges are written by a background queue, reads still work via the chain in the meantime. |
+| `shared_blobs` | Reachable blob count materialized at fork time. |
+| `owned_blobs` | Blobs the fork itself wrote. Always `0` immediately after creation. |
 
-1. **Git objects** — All objects (blobs, trees, commits, refs) are fully copied to the fork's R2 storage
-2. **Code graph** — All nodes and edges are bulk-copied via SQL with repo-scoped IDs
-3. **Semantic vectors** — Not copied. Search queries both the fork's Pinecone namespace and the parent's namespace in parallel, merging results. As the fork diverges, new content is indexed into the fork's own namespace
+## What Happens During an Instant Fork
+
+1. **No R2 copy.** Git objects live in a single global content-addressed
+   keyspace (`_blobs/{sha[:2]}/{sha[2:]}`) shared across every repo in your
+   org. Forking just records that the new repo references those existing
+   blobs.
+2. **Refs are snapshotted.** Parent's branch + tag SHAs at fork time are
+   written to a `fork_snapshot` row. The fork's `GET /refs` and `GET /commits`
+   read from the snapshot until the fork pushes.
+3. **First push is copy-on-write.** Writing to a ref in the fork shadows the
+   snapshot for that name; the parent is never touched.
+4. **Blob refcount edges (`blob_repo`) are materialized.** Sync probe up to
+   ~5000 reachable objects; larger parents queue the rest in the background.
+
+## Fork Behavior
+
+- **Forks are independent on writes.** Pushes to the parent are not visible
+  through the fork — the snapshot is the durable point-in-time anchor.
+- **Forks are private by default** (`visibility: "private"`).
+- **Forks are never templates** (`is_template: false`).
+- **Deleting the parent does not affect existing forks.** Each fork holds its
+  own `blob_repo` edges, so the parent's blobs survive in the global store
+  for as long as any fork still references them. Garbage collection sweeps
+  orphaned blobs after a 7-day grace period.
+- **Cross-org forks of public templates** support both modes; permission to
+  fork is checked at fork-time and sealed into the fork's refcount edges.
+
+## Multi-Level Forks (chain depth)
+
+Forks of forks are first-class. Each fork carries:
+
+- `fork_root` — the repo at the top of the chain.
+- `fork_depth` — distance from the root (`1`, `2`, ...).
+- An internal `fork_chain` — the ordered list of ancestors, capped at 16.
+
+When `fork_depth` would exceed 16, the API auto-flattens the new repo to
+`mode: "deep"` instead. This keeps read paths bounded to a single SHA lookup
+in the global blob store.
+
+## Search on Forks
+
+Semantic search and code-graph queries on an instant fork transparently fan
+out to the parent's namespaces and merge results. The fork's own results take
+priority on dedup. As the fork diverges and re-indexes, its own namespace
+takes over.
+
+`mode: "deep"` (and pre-existing `"copied"` forks created before instant
+forks landed) are self-contained — searches stay scoped to the fork's
+namespace alone.
 
 ## Access Control
 
 | Scenario | Required |
 |----------|----------|
-| Same-org fork | Read access on source repo |
-| Cross-org fork | Source must be `is_template: true` AND `visibility: "public"` |
+| Same-org fork | Read access on source repo. |
+| Cross-org fork | Source must be `is_template: true` AND `visibility: "public"`. |
 
-## Fork Behavior
+## SDK
 
-- Forks are independent copies — changes to the template do not propagate
-- Forks are always created with `visibility: "private"`
-- Forks are never templates themselves (`is_template: false`)
-- Deleting the parent template does not affect existing forks
-- Semantic search on forks gracefully degrades if the parent is deleted
-- The `forked_from` field on the repo object shows the parent relationship
+```ts
+import { createCoregitClient } from "@coregit/sdk";
+
+const cg = createCoregitClient({ apiKey: process.env.COREGIT_API_KEY! });
+
+const { data, error } = await cg.repos.fork("nextjs-starter", {
+  slug: "agent-001",
+  // mode: "instant" is the default — omit to get instant forks.
+});
+```
+
+## CLI
+
+```bash
+cgt repos fork nextjs-starter --slug agent-001
+cgt repos fork nextjs-starter --slug agent-deep --mode deep
+```
+
+The default is `instant`. Pass `--mode deep` only when you need a
+chain-flattened standalone copy.
