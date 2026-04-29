@@ -44,7 +44,7 @@ GET /v1/repos/:slug/blob/:ref/*path
 GET /v1/repos/:namespace/:slug/blob/:ref/*path
 ```
 
-Returns the file content. Binary files are returned as base64. Max file size: **50 MB**.
+Returns the file content. Binary files are returned as base64. Max file size: **50 MB** (lifted when `Range` is set — see below).
 
 **Response** `200`:
 
@@ -58,7 +58,96 @@ Returns the file content. Binary files are returned as base64. Max file size: **
 }
 ```
 
-Supports `ETag` / `If-None-Match` for caching.
+Supports `ETag` / `If-None-Match` for caching. Sets `Accept-Ranges: bytes` so clients can probe range support.
+
+### Range Reads
+
+Send an HTTP `Range: bytes=N-M` (or `bytes=N-` for "to end") header to fetch a slice. Inclusive byte offsets, RFC 7233 semantics. The 50 MB cap is bypassed when `Range` is present — useful for streaming logs, model weights, or any large asset in chunks.
+
+```http
+GET /v1/repos/:slug/blob/main/big.parquet
+Range: bytes=0-1048575
+```
+
+**Response** `206 Partial Content`:
+
+```json
+{
+  "content": "<base64 of bytes 0-1048575>",
+  "encoding": "base64",
+  "path": "big.parquet",
+  "sha": "ab12...",
+  "size": 5242880,
+  "range": { "start": 0, "end": 1048575, "length": 1048576 }
+}
+```
+
+Headers: `Content-Range: bytes 0-1048575/5242880`, `Vary: Range`. Returns `416` with `Content-Range: bytes */<size>` for an out-of-range request.
+
+## Read Multiple Files (Batch)
+
+```http
+POST /v1/repos/:slug/blobs/batch
+POST /v1/repos/:namespace/:slug/blobs/batch
+```
+
+Read up to 100 files in one round-trip. Reuses the same KV-cached flat-tree path as `/blob`, so the cost is one ref-resolve plus N parallel R2 reads (server chunks at 25 to fit the Worker subrequest budget). Use this from `MountedFS.readFiles()` to collapse N `readFile` RTTs into one.
+
+**Body**:
+
+```json
+{
+  "ref": "main",
+  "paths": ["README.md", "src/a.ts", "src/b.ts"],
+  "encoding": "auto",
+  "max_size": 52428800
+}
+```
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `ref` | repo's default branch | Branch name, tag, or commit SHA. |
+| `paths` | required | Up to 100 file paths. |
+| `encoding` | `"auto"` | `"auto"` sniffs binary per file; `"binary"` always base64; `"text"` always utf-8. |
+| `max_size` | `52428800` (50 MB) | Per-blob cap. Oversize blobs return `truncated: true` with no `content`. |
+
+**Response** `200`:
+
+```json
+{
+  "blobs": [
+    { "path": "README.md", "sha": "f6b1...", "size": 20, "encoding": "utf-8", "content": "# ...\n" },
+    { "path": "src/a.ts",  "sha": "cc79...", "size": 20, "encoding": "utf-8", "content": "..." }
+  ],
+  "missing": ["nonexistent.md"]
+}
+```
+
+ETag is `W/"batch-<hash>"` derived from the sorted SHA list of resolved blobs — clients can short-circuit a repeat batch with `If-None-Match`.
+
+## Stream Raw Bytes
+
+```http
+GET /v1/repos/:slug/raw/:ref/*path
+GET /v1/repos/:namespace/:slug/raw/:ref/*path
+```
+
+Streaming sibling of `/blob/`. Returns raw bytes (no JSON envelope, no base64 inflation). Content-Type is sniffed: `text/plain; charset=utf-8` for text, `application/octet-stream` for binary. Honors the same `Range` header as `/blob/`.
+
+**Response** `200`:
+
+```
+HTTP/2 200
+Content-Type: text/plain; charset=utf-8
+Content-Length: 20
+ETag: "cc79..."
+X-Content-Sha: cc79...
+Accept-Ranges: bytes
+
+export const a = 1;
+```
+
+The `X-Content-Sha` header carries the git blob SHA so clients can cache by content. Use this for large files where the JSON+base64 overhead of `/blob` matters (~33 % savings on binary, plus no client-side base64 decode).
 
 ## List Refs
 

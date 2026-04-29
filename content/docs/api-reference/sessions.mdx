@@ -1,0 +1,97 @@
+---
+title: Sessions
+description: Zero-Wait Git Protocol — open a session once, skip per-request DB/KV auth, configure the TTL.
+---
+
+A session pins your authenticated identity to a Durable Object so subsequent requests skip the DB/KV auth lookup (~1 ms instead of ~50 ms cold). Pass the returned `session_id` as `X-Session-Id` on every following request.
+
+```http
+POST /v1/session
+Content-Type: application/json
+x-api-key: cgk_live_…
+
+{
+  "ttl_seconds": 3600,
+  "idle_extend": true
+}
+```
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `ttl_seconds` | `1800` (30 min) | Requested session lifetime. Capped server-side at **8 h paid / 1 h free**. |
+| `idle_extend` | `true` | When `true`, every authenticated request slides the expiry alarm. Set `false` for a fixed expiry from `open()`. |
+
+**Response** `201`:
+
+```json
+{
+  "session_id": "ses_THJ9Dht__5cfs_HKFAnZt",
+  "expires_at": "2026-04-29T04:01:18.481Z",
+  "ttl_seconds": 3600,
+  "idle_extend": true
+}
+```
+
+`ttl_seconds` in the response reflects the actual cap-applied value — request 99 hours on a free key, get back `3600` (1 h cap).
+
+## Use the Session
+
+Once opened, send the id on every subsequent request:
+
+```http
+GET /v1/repos/my-repo/blob/main/README.md
+x-api-key: cgk_live_…
+X-Session-Id: ses_THJ9Dht__5cfs_HKFAnZt
+```
+
+The Worker validates against the SessionDO (sub-millisecond) and skips the per-request `auth_cache` KV + DB lookup. With `idle_extend: true`, this same call also bumps the expiry alarm out by `ttl_seconds` from now.
+
+## Status
+
+```http
+GET /v1/session/:id/status
+```
+
+```json
+{
+  "objectCount": 0,
+  "createdAt": 1777428000000,
+  "lastActivityAt": 1777431600000,
+  "closed": false,
+  "ttlMs": 3000000
+}
+```
+
+`ttlMs` is the remaining time until expiry. Negative values mean the session is past its alarm (next request will hit the auth path again).
+
+## Flush
+
+```http
+POST /v1/session/:id/flush
+```
+
+```json
+{ "flushedObjects": 42, "flushedRefs": 1 }
+```
+
+Forces any pending git objects buffered in the SessionDO to be written through to R2. Most clients don't need this — the DO auto-flushes on close and on the TTL alarm.
+
+## Close
+
+```http
+DELETE /v1/session/:id
+```
+
+```json
+{ "status": "closed", "flushedObjects": 0, "flushedRefs": 0 }
+```
+
+Final flush + tombstone. The id is no longer accepted as `X-Session-Id` — subsequent requests fall back to the regular auth path.
+
+## When to use sessions
+
+- **Long-running agent loops** that do many reads/writes against the same repo. The DB-skip is `~50 ms × N requests` saved.
+- **Git smart-HTTP push** (under the hood, the SessionDO holds buffered objects until the final ref update).
+- **Pinning auth** for the duration of a transaction so a key rotation in the middle doesn't break a multi-step flow.
+
+Skip sessions for one-off SDK calls — the round-trip to open + close usually costs more than the auth-cache hit.

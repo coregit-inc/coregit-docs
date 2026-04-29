@@ -1,0 +1,75 @@
+---
+title: Prefetch
+description: Stream NDJSON of all blobs matching a glob list — pre-populate a client cache before the read-edit loop starts.
+---
+
+```http
+POST /v1/repos/:slug/prefetch
+POST /v1/repos/:namespace/:slug/prefetch
+```
+
+Streams NDJSON entries for every blob whose path matches one of `globs`. Each line is one blob; the final line is a `done` marker. Designed for SDK cache warm-up — `MountedFS.prefetch(globs)` consumes this directly to seed its LRU before the agent starts reading.
+
+**Body**:
+
+```json
+{
+  "ref": "main",
+  "globs": ["src/**/*.ts", "package.json"],
+  "max_bytes": 16777216,
+  "max_blob_bytes": 1048576
+}
+```
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `ref` | repo's default branch | Branch name, tag, or commit SHA. |
+| `globs` | required | 1–32 glob patterns. Supported syntax: `*` (any non-slash), `?` (single non-slash), `**` (any path including slashes). No braces, no extglob, no character classes. |
+| `max_bytes` | `16777216` (16 MB) | Cumulative cap on response payload. Hard ceiling: 32 MB. Once exceeded, the server emits `done` with `capped: true` and stops. |
+| `max_blob_bytes` | `1048576` (1 MB) | Per-blob cap. Oversize blobs are silently skipped (they don't count toward `max_bytes`). Hard ceiling: 4 MB. |
+
+## Response (NDJSON stream)
+
+```
+Content-Type: application/x-ndjson
+Cache-Control: no-store
+
+{"path":"src/a.ts","sha":"cc79...","size":20,"encoding":"text","content_b64":"ZXhwb3J0..."}
+{"path":"src/b.ts","sha":"2021...","size":20,"encoding":"text","content_b64":"ZXhwb3J0..."}
+{"done":true,"entries":2,"bytes":284,"capped":false,"ref":"main","commit_sha":"6f7d..."}
+```
+
+| Field | Per-blob | Done marker |
+|-------|----------|-------------|
+| `path` | yes | — |
+| `sha` | yes | — |
+| `size` | yes | — |
+| `encoding` | `"text"` or `"binary"` | — |
+| `content_b64` | base64 (always — clients decode based on `encoding`) | — |
+| `done` | — | `true` |
+| `entries` | — | how many blobs streamed |
+| `bytes` | — | total response size |
+| `capped` | — | `true` if `max_bytes` was hit before all matched blobs streamed |
+| `commit_sha` | — | the resolved commit at the time of read |
+
+Always exactly one `done` line at the end, even on errors (which add an `error` field).
+
+## Why streaming
+
+A monorepo with 5 000 TypeScript files and 16 MB of source is ~3-5 s of R2 reads. NDJSON lets the client begin populating its cache (and unblocking reads) at the first byte rather than waiting for the whole batch.
+
+## Glob examples
+
+- `["src/**/*.ts"]` — every `.ts` file under `src/`
+- `["*.json"]` — JSON files at the repo root only (no `**`)
+- `["package.json", "tsconfig.json", "src/**/*.ts"]` — explicit roots + recursive code
+
+## SDK
+
+```typescript
+const fs = await cg.fs.mount({ repos: [{ slug: "my-repo" }], mode: "rw" });
+const { entries, bytes, capped } = await fs.prefetch(["src/**/*.ts"], {
+  maxBytes: 8 * 1024 * 1024,
+});
+// later — readFile/readFiles for any prefetched path is now zero-RTT
+```

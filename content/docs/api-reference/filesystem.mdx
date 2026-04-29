@@ -45,6 +45,9 @@ const fs = await cg.fs.mount({
 | `branch` | No | Default branch applied to repos that don't set their own. Defaults to `"main"`. |
 | `author` | No | `{ name, email }` used for auto-mode commits. Defaults to `coregit-sdk <sdk@coregit.dev>`. |
 | `commitMode` | No | See [Commit modes](#commit-modes) below. Default `"auto"`. |
+| `cache` | No | Local LRU blob cache (default 64 MiB, on). See [Cache](#cache). |
+| `session` | No | Bind the mount to a [Zero-Wait session](/docs/api-reference/sessions). See [Sessions](#sessions). |
+| `execStrategy` | No | `"remote"` (default), `"local"`, or `"auto"`. Where `bash().exec()` runs. See [Exec strategy](#exec-strategy). |
 
 `mount()` is purely client-side construction — no HTTP — so it's cheap to call repeatedly.
 
@@ -84,6 +87,70 @@ const bytes = await fs.readFile("/my-repo/img.png", { encoding: "binary" });
 ```
 
 UTF-8 string by default. Pass `{ encoding: "binary" }` to get a `Uint8Array`.
+
+Hits the local cache first (if enabled) and short-circuits via `If-None-Match` on a 304 — repeat reads of the same blob avoid both the network RTT and the body transfer.
+
+### `readFiles(paths, options?)`
+
+```typescript
+const blobs = await fs.readFiles([
+  "/my-repo/README.md",
+  "/my-repo/src/a.ts",
+  "/my-repo/src/b.ts",
+]);
+// → Map<string, string | Uint8Array>
+for (const [path, content] of blobs) console.log(path, content);
+```
+
+Collapses N `readFile` round-trips into one `POST /v1/repos/:slug/blobs/batch` (up to 100 paths per repo). Cache hits are served locally; only the misses are batched. Throws `MountPathError("ENOENT")` if any path doesn't exist.
+
+Multi-repo mounts route automatically — paths are grouped by repo, and one batch request goes per repo.
+
+### `readFileRange(path, start, end)`
+
+```typescript
+const slice = await fs.readFileRange("/my-repo/big.parquet", 0, 1023);
+// → Uint8Array of 1024 bytes
+```
+
+Read a byte range without loading the whole blob client-side. Bypasses the 50 MB blob cap (the `Range` header lifts it). Inclusive byte offsets, HTTP semantics. Useful for tailing logs or reading specific records out of large data files.
+
+### `createReadStream(path, options?)`
+
+```typescript
+const stream = await fs.createReadStream("/my-repo/asset.bin");
+// → ReadableStream<Uint8Array>
+for await (const chunk of stream) {
+  // process incrementally
+}
+```
+
+Web `ReadableStream` over the `/raw` endpoint — no JSON envelope, no base64 inflation. Optional `{ start, end }` for a range slice. Use this for big files where you don't want them all in memory client-side.
+
+### `watch(options?)`
+
+```typescript
+for await (const ev of fs.watch()) {
+  console.log("commit:", ev.sha);
+}
+```
+
+Async iterator over branch-tip changes. Auto-reconnects on the server's 25 s rotation, auto-invalidates the local cache for the watched branch on each event. Single-repo mounts only.
+
+See the [Watch endpoint](/docs/api-reference/watch) for the underlying SSE protocol.
+
+### `prefetch(globs, options?)`
+
+```typescript
+const { entries, bytes, capped } = await fs.prefetch([
+  "src/**/*.ts",
+  "package.json",
+]);
+```
+
+Streams blobs matching the globs into the local cache via `POST /prefetch` (NDJSON). Subsequent `readFile`/`readFiles` for any prefetched path are zero-RTT. Caps: 16 MB total, 1 MB per blob, 32 globs (server-enforced). No-op when caching is disabled.
+
+See the [Prefetch endpoint](/docs/api-reference/prefetch) for body shape and limits.
 
 ### `readdir(path, options?)`
 
@@ -190,17 +257,83 @@ const r = await fs.bash().exec(`
 
 Paths must start with `/<slug>/`. Cross-repo `mv` is supported but not atomic — it does a read on the source repo, write on the destination, then a delete on the source.
 
-## Errors
+## Cache
 
-| Class | Thrown when |
-|-------|-------------|
-| `MountError` | Generic — wraps any HTTP failure, network error, or precondition violation. |
-| `MountReadOnlyError` | A mutating call (`writeFile`, `rm`, `mv`, `mkdir`, `commit`) on a `mode: "ro"` mount. |
-| `MountPathError` | Path doesn't start with `/`, doesn't match any mounted repo, or refers to a missing file (404 from server). |
-| `MountConflictError` | CAS conflict when committing — branch HEAD moved underneath you. |
+By default `MountedFS` keeps a 64 MiB byte-budget LRU keyed by `<repo>:<branch>:<path>` for blobs you read. Cached entries also store the git SHA so the next `readFile` of the same path can short-circuit via `If-None-Match` and accept a 304 from the server. Invalidation happens automatically on `writeFile` / `rm` / `mv` / `commit` / `bash().exec()`.
 
 ```typescript
-import { MountConflictError } from "@coregit/sdk";
+const fs = await cg.fs.mount({
+  repos: [{ slug: "my-repo" }],
+  mode: "rw",
+  cache: { maxBytes: 128 * 1024 * 1024 },  // 128 MiB instead of 64
+});
+
+console.log(fs.cacheStats());
+// → { entries: 47, bytes: 8421376, maxBytes: 134217728 }
+```
+
+Disable with `cache: { enabled: false }`. `cacheStats()` returns `null` when disabled.
+
+## Sessions
+
+Pin the mount to a [Zero-Wait session](/docs/api-reference/sessions) so per-request DB/KV auth lookups are skipped. Three patterns:
+
+```typescript
+// 1. mount() opens and unmount() closes — the simple case
+await cg.fs.mount({
+  repos: [{ slug: "my-repo" }],
+  session: { autoOpen: true, ttlSeconds: 3600 },
+});
+
+// 2. re-use an already-open session id (caller manages lifetime)
+await cg.fs.mount({
+  repos: [{ slug: "my-repo" }],
+  session: { id: existingSessionId },
+});
+
+// 3. open via SessionClient yourself
+const { data } = await cg.session.open({ ttl_seconds: 7200, idle_extend: true });
+// then pass data.session_id into mount()
+```
+
+`HttpClient` injects `X-Session-Id` on every subsequent SDK request — including the underlying `/blob`, `/blobs/batch`, and `/exec` calls.
+
+## Exec Strategy
+
+`bash().exec()` defaults to `execStrategy: "remote"` — the command runs server-side over the in-memory CoW overlay. Set `"local"` (Node-only) to materialise the repo into a tempdir, run `child_process.spawn`, and commit the diff:
+
+```typescript
+await cg.fs.mount({
+  repos: [{ slug: "my-repo" }],
+  execStrategy: "local",
+});
+```
+
+`"auto"` picks `"local"` when `process.versions.node` is available, otherwise falls back to `"remote"`. Local mode is experimental: it sees only committed state (buffered writes from `commitMode: "manual"` aren't replayed onto the tempdir), skips binary blobs and symlinks, and is single-repo only.
+
+## Errors
+
+| Class | `.code` | `.errno` | Thrown when |
+|-------|---------|----------|-------------|
+| `MountError` | `"EIO"` | `-5` | Generic — wraps any HTTP failure, network error, or precondition violation. |
+| `MountReadOnlyError` | `"EROFS"` | `-30` | A mutating call (`writeFile`, `rm`, `mv`, `mkdir`, `commit`) on a `mode: "ro"` mount. |
+| `MountPathError` | `"ENOENT"` (default) | `-2` | Path doesn't start with `/`, doesn't match any mounted repo, or refers to a missing file (404 from server). |
+| `MountConflictError` | `"ECONFLICT"` | `-1024` | CAS conflict when committing — branch HEAD moved underneath you. |
+
+All `MountError` subclasses carry POSIX-style `.code` and Node-libuv `.errno` so callers can branch like `node:fs`:
+
+```typescript
+import { MountConflictError, MountPathError } from "@coregit/sdk";
+
+try {
+  await fs.readFile("/my-repo/missing.md");
+} catch (err) {
+  if (err instanceof MountPathError && err.code === "ENOENT") {
+    // path doesn't exist — handle as "not found"
+  } else {
+    throw err;
+  }
+}
 
 try {
   await fs.commit({ message: "..." });
@@ -212,6 +345,8 @@ try {
   }
 }
 ```
+
+Authorization failures (`401` / `403`) become `MountError` with `.code === "EACCES"`. Custom 409s on non-commit endpoints become `MountConflictError`.
 
 ## Why this exists
 

@@ -1,4 +1,4 @@
 {
   "title": "API Reference",
-  "pages": ["index", "repositories", "forks", "branches", "commits", "files", "diff", "compare", "cherry-pick", "refs", "snapshots", "lfs", "workspace", "filesystem", "search", "semantic-search", "agentic-search", "code-graph", "wiki", "connections", "sync", "tokens", "webhooks", "usage", "audit"]
+  "pages": ["index", "repositories", "forks", "branches", "commits", "files", "diff", "compare", "cherry-pick", "refs", "snapshots", "lfs", "workspace", "filesystem", "watch", "prefetch", "sessions", "search", "semantic-search", "agentic-search", "code-graph", "wiki", "connections", "sync", "tokens", "webhooks", "usage", "audit"]
 }

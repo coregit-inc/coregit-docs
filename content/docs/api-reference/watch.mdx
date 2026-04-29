@@ -1,0 +1,65 @@
+---
+title: Watch (SSE)
+description: Server-Sent Events stream of branch updates — emits a commit event each time the branch tip moves.
+---
+
+```http
+GET /v1/repos/:slug/watch?branch=main
+GET /v1/repos/:namespace/:slug/watch?branch=main
+```
+
+Returns an `text/event-stream` connection that emits an event each time the requested branch's tip moves. Connections self-terminate after ~25 s with a `rotate` event — clients reconnect (the SDK iterator does this automatically). Keep-alive comments (`: keepalive`) are sent every 20 s so HTTP/2 idle timeouts and CDN buffers stay open.
+
+| Query Parameter | Default | Description |
+|-----------------|---------|-------------|
+| `branch` | repo's default branch | Branch name to watch. Tags / SHAs are not supported (they don't move). |
+
+## Events
+
+| Event | Payload | When |
+|-------|---------|------|
+| `connected` | `{sha, branch}` | Sent once on subscribe. The current head SHA so the client knows its starting baseline. |
+| `commit` | `{sha, branch, ts}` | Branch tip moved. `sha` is the new head, `ts` is the server timestamp in ms. |
+| `rotate` | `{sha, ts}` | Connection lifetime exceeded. The client reconnects to receive new commits. |
+
+Comments (`:` prefix) are keep-alives — clients should ignore them.
+
+## Example
+
+```bash
+curl -N "https://api.coregit.dev/v1/repos/my-repo/watch?branch=main" \
+  -H "x-api-key: $COREGIT_API_KEY"
+```
+
+```
+event: connected
+data: {"sha":"a1b2...","branch":"main"}
+
+: keepalive
+
+event: commit
+data: {"sha":"c3d4...","branch":"main","ts":1777431803123}
+
+event: rotate
+data: {"sha":"c3d4...","ts":1777431818123}
+```
+
+## SDK
+
+`MountedFS.watch()` returns an async iterator that handles reconnect and cache invalidation transparently:
+
+```typescript
+const fs = await cg.fs.mount({ repos: [{ slug: "my-repo" }], mode: "ro" });
+
+for await (const ev of fs.watch()) {
+  console.log("new commit:", ev.sha);
+  // The mount's local cache for this branch is auto-invalidated
+  // before this line runs, so the next readFile sees the new SHA.
+}
+```
+
+Single-repo mounts only — multi-repo mounts must `watch()` per repo via separate clients.
+
+## Implementation note
+
+The current implementation polls the resolved ref every 2 s. This is a deliberate v1 design: a Durable-Object subscriber list is the obvious next step once traffic warrants it. The 2 s pulse is invisible to the client — events arrive within ~2-3 s of the underlying commit.
