@@ -14,8 +14,8 @@ Copy this prompt and send it to your coding agent:
 ```
 Set up Coregit for this project. Run npx coregit-wizard@latest to install
 the CLI and skill. Then sign me up — ask for my email, call the signup API
-at https://app.coregit.dev/api/auth/agent/signup, ask me for the 6-digit
-code from my email, verify it at https://app.coregit.dev/api/auth/agent/verify,
+at https://platform.coregit.dev/api/auth/agent/signup, ask me for the 6-digit
+code from my email, verify it at https://platform.coregit.dev/api/auth/agent/verify,
 and store the API key with cgt auth login --api-key. After setup, show me
 a summary with my email, org, and API key.
 ```
@@ -25,7 +25,7 @@ a summary with my email, org, and API key.
 ### Step 1: Send verification code
 
 ```bash
-curl -s -X POST https://app.coregit.dev/api/auth/agent/signup \
+curl -s -X POST https://platform.coregit.dev/api/auth/agent/signup \
   -H "Content-Type: application/json" \
   -d '{"email": "you@example.com", "name": "Your Name"}'
 ```
@@ -40,7 +40,7 @@ A 6-digit code is sent to the email. The code expires in 10 minutes.
 ### Step 2: Verify and get API key
 
 ```bash
-curl -s -X POST https://app.coregit.dev/api/auth/agent/verify \
+curl -s -X POST https://platform.coregit.dev/api/auth/agent/verify \
   -H "Content-Type: application/json" \
   -d '{"email": "you@example.com", "code": "123456"}'
 ```

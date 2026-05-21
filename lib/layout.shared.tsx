@@ -14,7 +14,7 @@ export function baseOptions(): BaseLayoutProps {
     },
     links: [
       { text: 'Docs', url: '/docs', active: 'nested-url' },
-      { text: 'App', url: 'https://app.coregit.dev', active: 'none' },
+      { text: 'App', url: 'https://platform.coregit.dev', active: 'none' },
     ],
   };
 }
